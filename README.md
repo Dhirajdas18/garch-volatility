@@ -21,7 +21,7 @@ fresh data by GitHub Actions.
 - [x] HAR on range-based volatility and long-memory FIGARCH against GJR, EWMA and the 20-day variance
 - [x] Forecasts from 1 day to 3 months across the point-in-time top 200 (464 stocks) against the 20-day variance
 - [x] Sizing and volatility targeting with GARCH against the 20-day standard deviation, after costs
-- [ ] Market-wide stress and a risk-regime indicator
+- [x] Market-wide stress: stock stress breadth against India VIX and NIFTY's own forecasts
 
 ## Findings
 
@@ -164,6 +164,31 @@ each January on NIFTY's own history (finding 1), the 20-day standard deviation a
 - **Targeting cut the worst fall, not the return.** NIFTY held made 11.6% a year with a −38.4% worst
   drawdown; targeted with GJR, 10.2% with −23.8% (Sharpe 0.35 against 0.37); with the 20-day, 10.1% and
   −27.7% (0.31).
+### 7. Market-wide stress: India VIX warned best; stock breadth added something NIFTY's own GARCH missed
+
+<a href="docs/img/regime_timeline.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/regime_timeline.png"><img src="docs/img/regime_timeline.gif" alt="Daily share of the top 200 with GJR volatility above 1.5 times normal, and NIFTY below its running peak, 2017-2026" width="720"></picture></a>
+
+<a href="docs/img/regime_warning.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/regime_warning.png"><img src="docs/img/regime_warning.gif" alt="Rank correlation of five predictors with next month's NIFTY volatility, alone and beyond NIFTY's GJR forecast" width="720"></picture></a>
+
+Each January every stock gets GJR with Student-t shocks and common parameters (finding 3), set to its own
+long-run variance. Each day, a stock's ratio is its one-day GJR volatility divided by that long-run level;
+stress breadth is the share of that day's top-200 universe with a ratio above 1.5, and the median ratio
+summarises the whole list. At each of 117 month-ends from January 2017 these, India VIX, and NIFTY's own
+GJR and 20-day forecasts are compared, by rank correlation, with what NIFTY did over the next 22 trading
+days.
+
+- **March 2020 hit almost every stock at once.** On 26 March 2020, 98.5% of the top 200 were above 1.5
+  times their normal volatility (median day: 1.5%). The 2024 election-result week peaked at 54.5% (6 June);
+  the early-2025 sell-off at 11.5% (28 January).
+- **India VIX warned best.** Its rank correlation with next month's NIFTY volatility was 0.67, against
+  0.55 for NIFTY's 20-day volatility, 0.53 for the median ratio, 0.51 for NIFTY's GJR and 0.47 for the
+  stress share.
+- **Breadth added something NIFTY's own model missed.** After removing what NIFTY's GJR forecast already
+  said, the median ratio still ranked next month's volatility at 0.31 and the stress share at 0.28;
+  India VIX at 0.52.
+- **Stress signalled risk, not direction.** Split by the median ratio into thirds, NIFTY's next 22 days
+  after the most stressed month-ends had 18.5% volatility and a −4.9% average worst fall, against 10.5%
+  and −3.1% after the calmest, but returned +1.5% against +0.8%.
 
 ## Quick start
 
@@ -171,7 +196,7 @@ each January on NIFTY's own history (finding 1), the 20-day standard deviation a
 uv sync
 uv run python scripts/fetch_data.py         # Yahoo Finance -> data/prices.parquet
 GV_LAKE_DIR=... uv run gv report asymmetry  # also: distributions, refit, har, horizons,
-                                            # sizing
+                                            # sizing, regime
 uv run python scripts/build_site.py         # GARCH lab -> site/index.html (fits every model)
 uv run pytest
 ```
@@ -208,6 +233,8 @@ Every `gv report` needs a local NSE bhavcopy archive (`GV_LAKE_DIR` with `panel.
   re-estimated each January, and QLIKE scoring with Newey-West t-statistics.
 - `src/gv/sizing.py`: inverse-volatility weights with delivery costs, NIFTY GJR forecasts and a
   monthly volatility target with cash.
+- `src/gv/regime.py`: daily stock-by-stock GJR volatility ratios, stress breadth, and the
+  month-end comparison with India VIX and NIFTY's forecasts.
 - `src/gv/reports.py`: README findings, reproducible with `gv report <topic>`.
 - Conventions: returns are daily log returns in percent; a variance for day t uses returns up to
   t − 1 only, and HAR features for day t use data up to t; volatility is annualised with the

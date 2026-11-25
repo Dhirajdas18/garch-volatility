@@ -719,6 +719,140 @@ def report_sizing(out_dir: Path) -> dict:
     return res
 
 
+def report_regime(out_dir: Path) -> dict:
+    """Market-wide volatility stress, 2017-2026: the daily share of the top-200 universe whose GJR
+    volatility (common parameters) is above 1.5 times its own long-run level, and the median ratio;
+    at each month-end, how well it, India VIX, NIFTY's GJR and 20-day forecasts ranked NIFTY's
+    volatility and returns over the next 22 trading days. Needs GV_LAKE_DIR."""
+    from scipy.stats import spearmanr
+
+    from gv.regime import breadth, daily_ratios, monthly_check, partial_rank_corr
+    from gv.sizing import nifty_forecasts
+    from gv.universe import lake_ohlc, load_universe
+
+    res = {}
+    ohlc = lake_ohlc()
+    uni = load_universe()
+    c = ohlc["adj_close"]
+    syms = sorted(set(uni[(uni["date"] >= "2017-01-01") & (uni["rank"] <= 200)]["symbol"]))
+    rets = {s: (100 * np.log(c[s] / c[s].shift(1))).dropna() for s in syms if s in c.columns}
+    b = breadth(daily_ratios(rets), uni)
+    market = pd.read_parquet(Path(os.environ["GV_LAKE_DIR"]) / "market.parquet").set_index("date")
+    nifty = market["nifty"].dropna()
+    r = (100 * np.log(nifty / nifty.shift(1))).dropna()
+    me = pd.Index(nifty.index.to_series().groupby(nifty.index.to_period("M")).max().to_numpy())
+    d = monthly_check(b, nifty, market["vix"], nifty_forecasts(r, me))
+    res["daily stress share"] = (
+        f"{len(b)} days {b.index[0]:%b %Y}-{b.index[-1]:%b %Y}; "
+        f"median {100 * b['share'].median():.1f}% "
+        f"of stocks above 1.5x their normal volatility, 90th percentile "
+        f"{100 * b['share'].quantile(0.9):.1f}%; peak {100 * b['share'].max():.1f}% on "
+        f"{b['share'].idxmax():%d %b %Y}"
+    )
+    for label, a, z in (
+        ("March-April 2020", "2020-03-01", "2020-04-30"),
+        ("January-March 2025", "2025-01-01", "2025-03-31"),
+        ("June 2024", "2024-06-01", "2024-06-30"),
+    ):
+        w = b.loc[a:z]
+        res[f"peak stress share, {label}"] = (
+            f"{100 * w['share'].max():.1f}% on {w['share'].idxmax():%d %b %Y}"
+        )
+    preds = ["India VIX", "NIFTY 20-day", "median ratio", "NIFTY GJR", "stress share"]
+    rho = {}
+    for k in preds:
+        rho[k] = {
+            y: spearmanr(d[k], d[y]).statistic
+            for y in ("next vol", "next return", "next worst fall")
+        }
+        res[f"{k}, rank correlation with the next 22 days"] = (
+            f"volatility {rho[k]['next vol']:.2f}, return {rho[k]['next return']:+.2f}, worst "
+            f"fall {rho[k]['next worst fall']:+.2f}"
+        )
+    part = {
+        k: partial_rank_corr(d, k, "next vol", "NIFTY GJR")
+        for k in ("India VIX", "median ratio", "stress share")
+    }
+    res["beyond NIFTY's GJR (partial rank correlation with next volatility)"] = ", ".join(
+        f"{k} {v:.2f}" for k, v in part.items()
+    )
+    d["tercile"] = pd.qcut(d["median ratio"], 3, labels=["calm", "middle", "stressed"])
+    g = d.groupby("tercile", observed=True)
+    for name, row in g.agg(
+        v=("next vol", "mean"),
+        r=("next return", "mean"),
+        f=("next worst fall", "mean"),
+        n=("next return", "size"),
+    ).iterrows():
+        res[f"next 22 days after a {name} month-end (median ratio terciles)"] = (
+            f"{row['n']:.0f} months: NIFTY volatility {100 * row['v']:.1f}%, return "
+            f"{100 * row['r']:+.1f}%, worst fall {100 * row['f']:.1f}%"
+        )
+    res["months"] = f"{len(d)} month-ends {d.index[0]:%b %Y}-{d.index[-1]:%b %Y}"
+
+    fig, axes = plt.subplots(2, 1, figsize=(10, 5.4), sharex=True, height_ratios=[1.2, 1])
+    axes[0].fill_between(b.index, 0, 100 * b["share"], color=plots.SERIES[1], alpha=0.5, lw=0)
+    axes[0].plot(b.index, 100 * b["share"], color=plots.SERIES[1], lw=0.8)
+    axes[0].set_ylabel("% of top 200 above\n1.5x their normal")
+    axes[0].set_title(
+        "Stress breadth: stocks whose GJR volatility is far above their own normal",
+        fontsize=10,
+        fontweight="normal",
+        loc="left",
+    )
+    n = nifty.loc[b.index[0] :]
+    dd = 100 * (n / n.cummax() - 1)
+    axes[1].fill_between(dd.index, dd, 0, color=plots.COLORS["NIFTY"], alpha=0.4, lw=0)
+    axes[1].set_ylabel("NIFTY below its\nrunning peak, %")
+    fig.suptitle(
+        "March 2020 lifted almost every stock at once; later sell-offs touched far fewer",
+        x=0.02,
+        ha="left",
+    )
+    fig.tight_layout()
+    plots.save(fig, out_dir, "regime_timeline")
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    xs = np.arange(len(preds))
+    v1 = [rho[k]["next vol"] for k in preds]
+    v2 = [part.get(k, np.nan) for k in preds]
+    ax.bar(
+        xs - 0.2,
+        v1,
+        0.38,
+        color=plots.SERIES[0],
+        label="rank correlation with next month's NIFTY volatility",
+    )
+    ax.bar(
+        xs + 0.2,
+        [0 if np.isnan(x) else x for x in v2],
+        0.38,
+        color=plots.SERIES[2],
+        label="the same, beyond NIFTY's own GJR forecast",
+    )
+    for i, (a, bb) in enumerate(zip(v1, v2, strict=True)):
+        ax.text(i - 0.2, a + 0.01, f"{a:.2f}", ha="center", fontsize=8, color=plots.TEXT)
+        if not np.isnan(bb):
+            ax.text(i + 0.2, bb + 0.01, f"{bb:.2f}", ha="center", fontsize=8, color=plots.TEXT)
+    ax.set_xticks(xs, preds)
+    ax.set_ylim(0, 0.8)
+    ax.legend(fontsize=8, loc="upper right")
+    ax.set_title(
+        f"{len(d)} month-ends, {d.index[0]:%Y}-{d.index[-1]:%Y}",
+        fontsize=10,
+        fontweight="normal",
+        loc="left",
+    )
+    fig.suptitle(
+        "India VIX warned best; stock stress breadth added something NIFTY's own model missed",
+        x=0.02,
+        ha="left",
+    )
+    fig.tight_layout()
+    plots.save(fig, out_dir, "regime_warning")
+    return res
+
+
 REPORTS: dict[str, Callable[[Path], dict]] = {
     "asymmetry": report_asymmetry,
     "distributions": report_distributions,
@@ -726,4 +860,5 @@ REPORTS: dict[str, Callable[[Path], dict]] = {
     "har": report_har,
     "horizons": report_horizons,
     "sizing": report_sizing,
+    "regime": report_regime,
 }
