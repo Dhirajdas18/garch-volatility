@@ -325,7 +325,110 @@ def report_distributions(out_dir: Path) -> dict:
     return res
 
 
+def report_refit(out_dir: Path) -> dict:
+    """Estimation in practice for GJR with Student-t shocks on the 172 stocks of the asymmetry
+    study: five ways to set parameters before each test year 2020-2026 (frozen 2014-2019 fit,
+    yearly refits on expanding, 4-year and 2-year windows, and common cross-sectional parameters
+    with each stock's own variance level), scored with frozen parameters through each year; how much
+    fits move and how often they are unreliable. Needs GV_LAKE_DIR."""
+    from gv.refit import SCHEMES, run, stock_returns
+    from gv.universe import load_lake, load_universe
+
+    res = {}
+    px, _ = load_lake()
+    sc, fi = run(stock_returns(px, load_universe()))
+    n_schemes = sc.groupby(["symbol", "year"])["scheme"].transform("nunique")
+    sc = sc[n_schemes == len(SCHEMES)]
+    res["scored"] = (
+        f"{sc['symbol'].nunique()} stocks, {sc.groupby(['symbol', 'year']).ngroups} stock-years "
+        f"with all five schemes, 2020-2026"
+    )
+    tot = sc.groupby("scheme")[["ll", "days", "breaches"]].sum()
+    per = sc.groupby(["scheme", "symbol"])[["ll", "days", "breaches"]].sum()
+    out = {}
+    for k in SCHEMES:
+        row = tot.loc[k]
+        st = per.loc[k]
+        fails = np.mean(
+            [_kupiec_fails(b / d, d, 0.01) for b, d in zip(st["breaches"], st["days"], strict=True)]
+        )
+        better = (
+            st["ll"] / st["days"] > per.loc["frozen"]["ll"] / per.loc["frozen"]["days"]
+        ).mean()
+        out[k] = {
+            "ll": row["ll"] / row["days"],
+            "breach": row["breaches"] / row["days"],
+            "fails": fails,
+            "better": better,
+        }
+        res[k] = (
+            f"log-likelihood a day {out[k]['ll']:.4f}; 1% VaR breached on "
+            f"{100 * out[k]['breach']:.2f}% of days; Kupiec rejects {fails:.0%} of stocks"
+            + ("" if k == "frozen" else f"; better than frozen for {better:.0%} of stocks")
+        )
+    for w in ("expanding", "rolling 4y", "rolling 2y"):
+        f = fi[fi["window"] == w]
+        res[f"fits on {w} windows"] = (
+            f"unreliable {f['unreliable'].mean():.0%} "
+            f"(not converged {(~f['converged']).mean():.1%}, "
+            f"beta < 0.5 {(f['beta'] < 0.5).mean():.0%}, persistence >= 0.999 "
+            f"{(f['persistence'] >= 0.999).mean():.0%}, nu > 50 {(f['nu'] > 50).mean():.0%}); "
+            f"persistence median {f['persistence'].median():.3f}"
+        )
+        pv = f.pivot(index="year", columns="symbol", values="persistence")
+        bv = f.pivot(index="year", columns="symbol", values="beta")
+        res[f"year-to-year change, {w}"] = (
+            f"persistence median {pv.diff().abs().stack().median():.3f}, beta "
+            f"{bv.diff().abs().stack().median():.3f}"
+        )
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.2))
+    names = list(SCHEMES)
+    xs = np.arange(len(names))
+    base = out["frozen"]["ll"]
+    v = [1000 * (out[k]["ll"] - base) for k in names]
+    axes[0].bar(xs, v, color=[plots.SERIES[0] if x >= 0 else plots.MUTED for x in v], width=0.55)
+    for i, x in enumerate(v):
+        axes[0].text(
+            i,
+            x + (0.15 if x >= 0 else -0.15),
+            f"{x:+.1f}",
+            ha="center",
+            va="bottom" if x >= 0 else "top",
+            fontsize=8,
+            color=plots.TEXT,
+        )
+    axes[0].axhline(0, color=plots.TEXT_2, lw=0.8)
+    axes[0].set_xticks(
+        xs, ["frozen\n2014-19", "expanding", "rolling\n4 years", "rolling\n2 years", "common"]
+    )
+    axes[0].set_ylabel("log-likelihood a day vs frozen, ×1000")
+    axes[0].set_title(
+        "2020-2026, refitted each January", fontsize=10, fontweight="normal", loc="left"
+    )
+    ws = ["expanding", "rolling 4y", "rolling 2y"]
+    u = [100 * fi[fi["window"] == w]["unreliable"].mean() for w in ws]
+    axes[1].bar(range(3), u, color=plots.SERIES[1], width=0.55)
+    for i, x in enumerate(u):
+        axes[1].text(i, x + 0.6, f"{x:.0f}%", ha="center", fontsize=9, color=plots.TEXT)
+    axes[1].set_xticks(range(3), ["expanding\n(6-12 years)", "4 years", "2 years"])
+    axes[1].set_ylabel("% of fits unreliable")
+    axes[1].set_title(
+        "Not converged, beta < 0.5, persistence ≥ 0.999 or ν > 50",
+        fontsize=10,
+        fontweight="normal",
+        loc="left",
+    )
+    fig.suptitle(
+        "More data beat fresher data; short windows gave unreliable fits", x=0.02, ha="left"
+    )
+    fig.tight_layout()
+    plots.save(fig, out_dir, "refit")
+    return res
+
+
 REPORTS: dict[str, Callable[[Path], dict]] = {
     "asymmetry": report_asymmetry,
     "distributions": report_distributions,
+    "refit": report_refit,
 }

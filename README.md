@@ -17,7 +17,7 @@ fresh data by GitHub Actions.
 
 - [x] Asymmetric GARCH (GJR, EGARCH) across 172 stocks, fitted on 2014–2019 and scored on 2020–2026
 - [x] Error distributions: normal, Student-t, skewed-t, scored by log-likelihood and VaR breaches
-- [ ] Estimation in practice: parameter stability, refit schedules, failed fits
+- [x] Estimation in practice: parameter stability, refit schedules, unreliable fits, common parameters
 - [ ] HAR on range-based volatility and component GARCH
 - [ ] Forecasts from 1 day to 3 months across 200 stocks against the 20-day standard deviation
 - [ ] Sizing and volatility targeting with GARCH against the 20-day standard deviation, after costs
@@ -73,13 +73,35 @@ whether each stock's breach rate is consistent with the promise.
   volatility paths with a median correlation of 0.982 and the same level (ratio 1.002).
 - **Six-year-old parameters were still off for many stocks.** Even with Student-t, Kupiec rejected the
   1% breach rate for 27% of stocks (5% would be expected by chance); finding 3 looks at refitting.
+### 3. More data beat fresher data; common parameters were the most reliable
+
+<a href="docs/img/refit.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/refit.png"><img src="docs/img/refit.gif" alt="Log-likelihood against a frozen fit for five ways of setting parameters, and the share of unreliable fits by window length" width="720"></picture></a>
+
+The same 172 stocks with GJR and Student-t shocks. Before each test year 2020–2026 the parameters are
+set five ways from data before 1 January: a single 2014–2019 fit kept frozen; a yearly refit on
+everything since 2014 (expanding); yearly refits on the last 4 or 2 years; and common parameters (the
+cross-stock median of each 4-year fit's α, γ, β and ν, with each stock's ω set so its long-run variance
+equals its own 4-year variance). Each is scored through the year with frozen parameters (1,193
+stock-years). A fit is called unreliable if it didn't converge, put β below 0.5, put persistence at or
+above 0.999, or put ν above 50.
+
+- **More data beat fresher data.** Refitting each year on everything since 2014 scored +0.0038
+  log-likelihood a day above the frozen fit (better for 81% of stocks) and cut Kupiec rejections of the
+  1% value at risk from 26% of stocks to 15%. Four-year windows gained +0.0007; two-year windows lost
+  0.0059.
+- **Short windows gave unreliable fits.** 30% of two-year fits were unreliable (24% put β below 0.5),
+  16% of four-year fits and 6% of expanding ones; none failed to converge. Persistence moved a median
+  0.071 a year with two-year windows, 0.024 with four and 0.009 with expanding.
+- **Common parameters were the most reliable.** One shared set of α, γ, β and ν, scaled to each
+  stock's own variance, scored +0.0030 (better than frozen for 59%) with the fewest Kupiec rejections
+  (12%) and a 1.02% breach rate.
 
 ## Quick start
 
 ```bash
 uv sync
 uv run python scripts/fetch_data.py         # Yahoo Finance -> data/prices.parquet
-GV_LAKE_DIR=... uv run gv report asymmetry  # also: distributions; needs a local NSE archive
+GV_LAKE_DIR=... uv run gv report asymmetry  # also: distributions, refit
 uv run python scripts/build_site.py         # GARCH lab -> site/index.html (fits every model)
 uv run pytest
 ```
@@ -108,6 +130,8 @@ Every `gv report` needs a local NSE bhavcopy archive (`GV_LAKE_DIR` with `panel.
   refits for stability.
 - `src/gv/dists.py`: the distribution study (normal, Student-t, skewed-t inside GJR), with VaR
   breaches.
+- `src/gv/refit.py`: refit schedules (frozen, expanding, rolling, common parameters with variance
+  targeting) scored year by year, and the unreliable-fit rule.
 - `src/gv/reports.py`: README findings, reproducible with `gv report <topic>`.
 - Conventions: returns are daily log returns in percent; a variance for day t uses returns up to
   t − 1 only, and HAR features for day t use data up to t; volatility is annualised with the
