@@ -505,9 +505,69 @@ def report_har(out_dir: Path) -> dict:
     return res
 
 
+def report_horizons(out_dir: Path) -> dict:
+    """Forecasts of average daily variance over the next 1, 5, 22 and 63 trading days, made at every
+    month-end from January 2017 for that day's top-200 universe (delisted stocks included), by the
+    20-day variance, EWMA, GJR-t with each stock's own expanding fit, GJR-t with common parameters,
+    and HAR; parameters set each January from earlier data; scored by QLIKE against realised squared
+    returns. Needs GV_LAKE_DIR."""
+    from gv.horizons import MODELS, run, score
+    from gv.universe import lake_ohlc, load_universe
+
+    res = {}
+    df = run(lake_ohlc(), load_universe())
+    sc = score(df)
+    res["coverage"] = (
+        f"{df['date'].nunique()} month-ends {df['date'].min():%b %Y}-{df['date'].max():%b %Y}, "
+        f"{df['symbol'].nunique()} different stocks"
+    )
+    for h, g in sc.groupby("h"):
+        g = g.set_index("model")
+        res[f"{h}-day horizon ({int(g['cases'].iloc[0])} cases)"] = "; ".join(
+            f"{m} {100 * g.at[m, 'vs 20-day']:+.0f}% (t {g.at[m, 't']:.1f}, better in "
+            f"{g.at[m, 'months better']:.0%} of months)"
+            for m in MODELS
+            if m != "20-day"
+        )
+
+    fig, ax = plt.subplots(figsize=(10, 4.4))
+    hs = sorted(sc["h"].unique())
+    models = [m for m in MODELS if m != "20-day"]
+    colors = {
+        "EWMA": plots.MUTED,
+        "GJR (own)": plots.COLORS["GJR"],
+        "GJR (common)": plots.SERIES[3],
+        "HAR": plots.SERIES[0],
+    }
+    w = 0.2
+    for j, m in enumerate(models):
+        v = [100 * sc[(sc["h"] == h) & (sc["model"] == m)]["vs 20-day"].iloc[0] for h in hs]
+        x = np.arange(len(hs)) + (j - 1.5) * w
+        ax.bar(x, v, w, color=colors[m], label=m)
+        for xi, vi in zip(x, v, strict=True):
+            ax.text(xi, vi - 1, f"{vi:.0f}", ha="center", va="top", fontsize=7, color=plots.TEXT)
+    ax.axhline(0, color=plots.TEXT_2, lw=0.8)
+    ax.set_xticks(range(len(hs)), [f"{h} day" + ("s" if h > 1 else "") for h in hs])
+    ax.set_ylabel("average QLIKE vs the 20-day variance, %")
+    ax.set_ylim(-60, 5)
+    ax.legend(fontsize=8, loc="lower left", ncol=2)
+    ax.set_title(
+        f"Top 200 each month-end, {df['date'].min():%Y}-{df['date'].max():%Y}, against "
+        "realised squared returns (lower is better)",
+        fontsize=10,
+        fontweight="normal",
+        loc="left",
+    )
+    fig.suptitle("The further ahead, the more the 20-day variance lost", x=0.02, ha="left")
+    fig.tight_layout()
+    plots.save(fig, out_dir, "horizons")
+    return res
+
+
 REPORTS: dict[str, Callable[[Path], dict]] = {
     "asymmetry": report_asymmetry,
     "distributions": report_distributions,
     "refit": report_refit,
     "har": report_har,
+    "horizons": report_horizons,
 }

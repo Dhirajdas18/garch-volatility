@@ -19,7 +19,7 @@ fresh data by GitHub Actions.
 - [x] Error distributions: normal, Student-t, skewed-t, scored by log-likelihood and VaR breaches
 - [x] Estimation in practice: parameter stability, refit schedules, unreliable fits, common parameters
 - [x] HAR on range-based volatility and long-memory FIGARCH against GJR, EWMA and the 20-day variance
-- [ ] Forecasts from 1 day to 3 months across 200 stocks against the 20-day standard deviation
+- [x] Forecasts from 1 day to 3 months across the point-in-time top 200 (464 stocks) against the 20-day variance
 - [ ] Sizing and volatility targeting with GARCH against the 20-day standard deviation, after costs
 - [ ] Market-wide stress and a risk-regime indicator
 
@@ -116,13 +116,36 @@ against the squared return.
 - **The 20-day variance came last.** Every other model beat it for 98–100% of stocks, on either target.
 - **HAR spread its weight evenly.** Median weights on the log of the last day, week and month: 0.23,
   0.23 and 0.22. Every model's average forecast sat below the proxy's average (ratios 0.85–0.92).
+### 5. Across 464 stocks and four horizons, GJR with common parameters halved the 20-day variance's loss at three months
+
+<a href="docs/img/horizons.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/horizons.png"><img src="docs/img/horizons.gif" alt="Average QLIKE of EWMA, GJR with own and common parameters, and HAR relative to the 20-day variance, at 1, 5, 22 and 63 days" width="720"></picture></a>
+
+At every month-end from January 2017 to October 2026 (118 origins) each stock in that day's top-200
+universe, delisted ones included (464 different stocks), gets a forecast of its average daily variance
+over the next 1, 5, 22 and 63 trading days. The forecasts: the 20-day variance and EWMA, which assume the
+future looks like now; GJR with Student-t shocks fitted on each stock's own history since 2013, or with
+common parameters (as in finding 3), both of which drift back toward the long-run level over the
+horizon; and HAR fitted for each horizon on range-based daily variance. Parameters are set each January
+from earlier data. The target is the realised average squared return over the horizon, which no model
+is fitted to; scoring is QLIKE, with Newey-West t-statistics on the monthly differences.
+
+- **Every model beat the 20-day variance at every horizon.** One day ahead the gain was 7–10% (t −4.2 to
+  −6.8); at 5 days 15–22%; at 22 days 24–38%; at 63 days 28–52%.
+- **The gap grew with the horizon.** The 20-day variance and EWMA assume today's level persists; GJR and
+  HAR let it revert. At 63 days GJR with common parameters lost 52% less than the 20-day variance (t −3.8,
+  better in 88% of months), GJR with own fits 48% and HAR 47%; EWMA only 28%.
+- **Common parameters matched or beat each stock's own fit** at every horizon (−10%, −22%, −38%, −52%
+  against −10%, −22%, −37%, −48%), with nothing to estimate per stock but its variance level.
+- **HAR's edge over GARCH didn't hold on this target.** Scored against realised squared returns, HAR sat
+  level with or slightly behind GJR at every horizon (finding 4's large HAR lead was against the range
+  proxy it is fitted to; against squared returns it was 9% to GJR's 7% there).
 
 ## Quick start
 
 ```bash
 uv sync
 uv run python scripts/fetch_data.py         # Yahoo Finance -> data/prices.parquet
-GV_LAKE_DIR=... uv run gv report asymmetry  # also: distributions, refit, har
+GV_LAKE_DIR=... uv run gv report asymmetry  # also: distributions, refit, har, horizons
 uv run python scripts/build_site.py         # GARCH lab -> site/index.html (fits every model)
 uv run pytest
 ```
@@ -155,6 +178,8 @@ Every `gv report` needs a local NSE bhavcopy archive (`GV_LAKE_DIR` with `panel.
   targeting) scored year by year, and the unreliable-fit rule.
 - `src/gv/har.py`: range-based daily variance with the overnight gap, log-HAR, FIGARCH and GJR
   filtered with fixed parameters, EWMA, the 20-day variance and QLIKE.
+- `src/gv/horizons.py`: monthly forecasts at 1-63 days for the point-in-time universe by five models
+  re-estimated each January, and QLIKE scoring with Newey-West t-statistics.
 - `src/gv/reports.py`: README findings, reproducible with `gv report <topic>`.
 - Conventions: returns are daily log returns in percent; a variance for day t uses returns up to
   t − 1 only, and HAR features for day t use data up to t; volatility is annualised with the
