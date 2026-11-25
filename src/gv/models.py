@@ -87,6 +87,17 @@ def long_run_variance(params: dict, model: str) -> float:
     return params["omega"] / (1 - p)
 
 
+def _tvalue(res, name: str) -> float | None:
+    """A parameter's robust t-statistic, or None when it is absent or can't be computed (arch
+    inverts the Hessian, which is singular when a parameter sits on its boundary)."""
+    try:
+        if name not in res.params:
+            return None
+        return float(res.tvalues[name])
+    except (np.linalg.LinAlgError, ValueError):
+        return None
+
+
 def fit(returns_pct, model: str = "GARCH", dist: str = "t") -> dict:
     """Fit a constant-mean GARCH, GJR or EGARCH (p=1, q=1, o=1 when asymmetric) by maximum
     likelihood with arch. Returns plain floats: mu, omega, alpha, gamma (0 for GARCH), beta,
@@ -123,7 +134,7 @@ def fit(returns_pct, model: str = "GARCH", dist: str = "t") -> dict:
         "bic": float(res.bic),
         "converged": bool(res.convergence_flag == 0),
         "n": len(y),
-        "gamma_t": float(res.tvalues["gamma[1]"]) if "gamma[1]" in p else None,
+        "gamma_t": _tvalue(res, "gamma[1]"),
     }
     out.update(dist_moments(dist, out["nu"], out["lambda"]))
     out["persistence"] = persistence(out, model)

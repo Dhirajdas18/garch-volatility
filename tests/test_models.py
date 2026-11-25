@@ -221,3 +221,20 @@ def test_har_fit_recovers_a_known_log_har():
     assert p["b"][1] > 0 and abs(p["b"][1:].sum() - 0.9) < 0.1
     f = har_forecast(rv, p)
     assert np.isnan(f.iloc[0]) and qlike(np.array([1.0]), np.array([1.0]))[0] == 0
+
+
+def test_tvalue_returns_none_when_the_hessian_is_singular():
+    import numpy as np
+    import pandas as pd
+
+    from gv.models import _tvalue
+
+    class Singular:
+        params = pd.Series({"gamma[1]": 0.0})
+
+        @property
+        def tvalues(self):
+            raise np.linalg.LinAlgError("Singular matrix")
+
+    assert _tvalue(Singular(), "gamma[1]") is None
+    assert _tvalue(Singular(), "missing") is None
