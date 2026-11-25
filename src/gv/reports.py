@@ -191,4 +191,141 @@ def report_asymmetry(out_dir: Path) -> dict:
     return res
 
 
-REPORTS: dict[str, Callable[[Path], dict]] = {"asymmetry": report_asymmetry}
+def _kupiec_fails(rate: float, n: int, p: float, level: float = 0.05) -> bool:
+    """Kupiec's unconditional coverage test: does a breach rate `rate` over `n` days reject the
+    promised rate `p` at `level`?"""
+    from scipy.stats import chi2
+
+    x = round(rate * n)
+    if x in (0, n):
+        lr = -2 * (n * np.log(1 - p)) if x == 0 else -2 * (n * np.log(p))
+    else:
+        ph = x / n
+        lr = -2 * (
+            (n - x) * np.log(1 - p) + x * np.log(p) - (n - x) * np.log(1 - ph) - x * np.log(ph)
+        )
+    return bool(lr > chi2.ppf(1 - level, 1))
+
+
+def report_distributions(out_dir: Path) -> dict:
+    """Normal, Student-t and skewed-t shocks inside GJR-GARCH: fitted on 2014-2019 for the same
+    172 stocks as the asymmetry study, scored on 2020-2026 with frozen parameters by log-likelihood
+    and by one-day 1% and 5% value-at-risk breaches; NIFTY alongside. Needs GV_LAKE_DIR."""
+    from gv.asym import pct_returns
+    from gv.dists import DISTS, run, study_stock
+    from gv.universe import load_lake, load_universe
+
+    res = {}
+    px, _ = load_lake()
+    st = run(px, load_universe())
+    res["stocks"] = (
+        f"{len(st)}; all fits converged: {bool(st[[f'{d}_converged' for d in DISTS]].all().all())}"
+    )
+    res["Student-t degrees of freedom"] = (
+        f"median {st['t_nu'].median():.1f} (10th-90th percentile {st['t_nu'].quantile(0.1):.1f}-"
+        f"{st['t_nu'].quantile(0.9):.1f}); a normal distribution is infinite"
+    )
+    res["skewed-t lambda"] = (
+        f"median {st['skewt_lambda'].median():+.3f}; negative (longer left tail) for "
+        f"{(st['skewt_lambda'] < 0).mean():.0%}"
+    )
+    fails = {}
+    for d in DISTS:
+        f1 = np.mean(
+            [
+                _kupiec_fails(b, n, 0.01)
+                for b, n in zip(st[f"{d}_breach1"], st["n_test"], strict=True)
+            ]
+        )
+        f5 = np.mean(
+            [
+                _kupiec_fails(b, n, 0.05)
+                for b, n in zip(st[f"{d}_breach5"], st["n_test"], strict=True)
+            ]
+        )
+        fails[d] = (f1, f5)
+        res[f"{d}, 2020-2026"] = (
+            f"log-likelihood a day {st[f'{d}_oos_ll'].mean():.4f}; 1% VaR breached on "
+            f"{100 * st[f'{d}_breach1'].mean():.2f}% of days (median stock "
+            f"{100 * st[f'{d}_breach1'].median():.2f}%), Kupiec rejects for {f1:.0%} of stocks; "
+            f"5% VaR breached {100 * st[f'{d}_breach5'].mean():.2f}%, rejects {f5:.0%}"
+        )
+    d1 = st["t_oos_ll"] - st["normal_oos_ll"]
+    d2 = st["skewt_oos_ll"] - st["t_oos_ll"]
+    res["Student-t minus normal"] = (
+        f"better for {(d1 > 0).mean():.0%} of stocks, median {d1.median():+.4f} a day"
+    )
+    res["skewed-t minus Student-t"] = (
+        f"better for {(d2 > 0).mean():.0%}, median {d2.median():+.5f} a day"
+    )
+    res["volatility path, Student-t against normal"] = (
+        f"median correlation {st['vol_corr_t_normal'].median():.3f}, median level ratio "
+        f"{st['vol_ratio_t_normal'].median():.3f}"
+    )
+    market = pd.read_parquet(Path(os.environ["GV_LAKE_DIR"]) / "market.parquet")
+    nf = study_stock(
+        pct_returns(market.set_index("date")["nifty"]),
+        (pd.Timestamp("2014-01-01"), pd.Timestamp("2019-12-31")),
+        (pd.Timestamp("2020-01-01"), pd.Timestamp("2026-12-31")),
+    )
+    for d in DISTS:
+        extra = ""
+        if nf[d]["nu"] is not None:
+            extra += f", nu {nf[d]['nu']:.1f}"
+        if nf[d]["lambda"] is not None:
+            extra += f", lambda {nf[d]['lambda']:+.3f}"
+        res[f"NIFTY, {d}"] = (
+            f"log-likelihood a day {nf[d]['oos_ll']:.4f}; 1% VaR breached "
+            f"{100 * nf[d]['breach1']:.2f}% of {nf['n_test']} days{extra}"
+        )
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.2), gridspec_kw={"width_ratios": [1, 1.2]})
+    axes[0].hist(
+        st["t_nu"].clip(upper=12),
+        bins=np.arange(2, 12.5, 0.5),
+        color=plots.COLORS["GJR"],
+        rwidth=0.9,
+    )
+    axes[0].axvline(nf["t"]["nu"], color=plots.COLORS["NIFTY"], lw=1.5)
+    axes[0].text(
+        nf["t"]["nu"] + 0.15, axes[0].get_ylim()[1] * 0.9, "NIFTY", fontsize=8, color=plots.TEXT_2
+    )
+    axes[0].yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+    axes[0].set_xlabel("Student-t degrees of freedom (lower = fatter tails)")
+    axes[0].set_ylabel("stocks")
+    axes[0].set_title(
+        f"{len(st)} stocks, fitted on 2014-2019", fontsize=10, fontweight="normal", loc="left"
+    )
+    labels = {"normal": "normal", "t": "Student-t", "skewt": "skewed-t"}
+    xs = np.arange(3)
+    v = [100 * st[f"{d}_breach1"].mean() for d in DISTS]
+    w = [100 * nf[d]["breach1"] for d in DISTS]
+    axes[1].bar(xs - 0.2, v, 0.38, color=plots.COLORS["GJR"], label="stocks (average)")
+    axes[1].bar(xs + 0.2, w, 0.38, color=plots.COLORS["NIFTY"], label="NIFTY")
+    for i in range(3):
+        axes[1].text(i - 0.2, v[i] + 0.03, f"{v[i]:.2f}", ha="center", fontsize=8, color=plots.TEXT)
+        axes[1].text(i + 0.2, w[i] + 0.03, f"{w[i]:.2f}", ha="center", fontsize=8, color=plots.TEXT)
+    axes[1].axhline(1.0, color=plots.TEXT_2, lw=0.8, ls="--")
+    axes[1].set_xticks(xs, [labels[d] for d in DISTS])
+    axes[1].set_ylabel("% of 2020-2026 days below the 1% VaR")
+    axes[1].legend(fontsize=8, loc="upper right")
+    axes[1].set_title(
+        "Promised 1% (dashed); frozen 2014-2019 parameters",
+        fontsize=10,
+        fontweight="normal",
+        loc="left",
+    )
+    fig.suptitle(
+        "Fat tails everywhere: a normal GARCH understated the 1% loss; Student-t hit it",
+        x=0.02,
+        ha="left",
+    )
+    fig.tight_layout()
+    plots.save(fig, out_dir, "distributions")
+    return res
+
+
+REPORTS: dict[str, Callable[[Path], dict]] = {
+    "asymmetry": report_asymmetry,
+    "distributions": report_distributions,
+}

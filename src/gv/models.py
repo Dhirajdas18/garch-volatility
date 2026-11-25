@@ -259,3 +259,31 @@ def predictive_loglik(returns_pct, params: dict, model: str, start: int) -> np.n
         scale = sd * np.sqrt((nu - 2) / nu)
         return student_t.logpdf(e, nu, scale=scale)
     raise ValueError("predictive_loglik supports normal and t")
+
+
+def _arch_dist(dist: str):
+    from arch.univariate import Normal, SkewStudent, StudentsT
+
+    return {"normal": Normal(), "t": StudentsT(), "skewt": SkewStudent()}[dist]
+
+
+def _dist_params(params: dict) -> np.ndarray:
+    if params["dist"] == "normal":
+        return np.array([])
+    if params["dist"] == "t":
+        return np.array([params["nu"]])
+    return np.array([params["nu"], params["lambda"]])
+
+
+def predictive_density(returns_pct, params: dict, model: str, start: int, q: float = 0.01):
+    """Day-by-day log density and lower-`q` value at risk (percent) of each return from `start`
+    on, with every parameter frozen and the variance known the day before; any of the three
+    distributions (arch's own formulas). Returns (log density array, VaR array, returns array)."""
+    y = np.asarray(returns_pct, dtype=float)
+    h = conditional_variance(y, params, model)[start:]
+    e = (y - params["mu"])[start:]
+    d = _arch_dist(params["dist"])
+    dp = _dist_params(params)
+    ll = d.loglikelihood(dp, e, h, individual=True)
+    var = params["mu"] + np.sqrt(h) * float(d.ppf(q, dp))
+    return np.asarray(ll), var, y[start:]

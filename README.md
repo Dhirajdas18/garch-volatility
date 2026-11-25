@@ -16,7 +16,7 @@ fresh data by GitHub Actions.
 ## Features
 
 - [x] Asymmetric GARCH (GJR, EGARCH) across 172 stocks, fitted on 2014–2019 and scored on 2020–2026
-- [ ] Error distributions: normal, Student-t, skewed-t
+- [x] Error distributions: normal, Student-t, skewed-t, scored by log-likelihood and VaR breaches
 - [ ] Estimation in practice: parameter stability, refit schedules, failed fits
 - [ ] HAR on range-based volatility and component GARCH
 - [ ] Forecasts from 1 day to 3 months across 200 stocks against the 20-day standard deviation
@@ -50,13 +50,36 @@ NIFTY is fitted the same way. Archive prices, no dividends.
 - **A stock's own asymmetry barely repeated.** The rank correlation between each stock's GJR bad-news
   term in 2014–2019 and in 2020–2026 was 0.29; in-sample, AIC preferred GJR for 42% of stocks and BIC
   for 14%.
+### 2. Every stock had fat tails; Student-t shocks fixed the 1% loss, skew added nothing for stocks
+
+<a href="docs/img/distributions.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/distributions.png"><img src="docs/img/distributions.gif" alt="Fitted Student-t degrees of freedom across 172 stocks, and 1% VaR breach rates on 2020-2026 for three shock distributions" width="720"></picture></a>
+
+The same 172 stocks, windows and frozen-parameter scoring as finding 1, with GJR and three shock
+distributions: normal, Student-t (fatter tails, with degrees of freedom ν; the lower, the fatter) and
+skewed-t (also lopsided, with λ). Each is scored on 2020–2026 by the log-likelihood of each day's return
+and by how often the return fell below the model's one-day 1% and 5% value at risk; Kupiec's test asks
+whether each stock's breach rate is consistent with the promise.
+
+- **Fat tails everywhere.** Student-t's degrees of freedom had a median of 4.8 (10th–90th percentile
+  3.6–6.1); NIFTY's was 7.7. On unseen years Student-t beat the normal for 100% of stocks (median
+  +0.064 log-likelihood a day).
+- **The normal understated the 1% loss.** Its 1% value at risk was breached on 1.50% of days on average
+  (Kupiec rejected 51% of stocks), against 0.97% for Student-t. At 5% it erred the other way (4.07%): a
+  normal is too wide in the middle and too thin in the tails.
+- **Skew helped NIFTY, not stocks.** Skewed-t matched Student-t for stocks (better for 48%, median
+  −0.00001 a day; λ was positive for 90%, a slightly longer right tail). For NIFTY, λ was −0.079 and
+  its 1% breach rate fell from 1.82% to 1.58%.
+- **The distribution changes the tails, not the volatility.** Student-t and normal fits gave
+  volatility paths with a median correlation of 0.982 and the same level (ratio 1.002).
+- **Six-year-old parameters were still off for many stocks.** Even with Student-t, Kupiec rejected the
+  1% breach rate for 27% of stocks (5% would be expected by chance); finding 3 looks at refitting.
 
 ## Quick start
 
 ```bash
 uv sync
 uv run python scripts/fetch_data.py         # Yahoo Finance -> data/prices.parquet
-GV_LAKE_DIR=... uv run gv report asymmetry  # needs a local NSE archive
+GV_LAKE_DIR=... uv run gv report asymmetry  # also: distributions; needs a local NSE archive
 uv run python scripts/build_site.py         # GARCH lab -> site/index.html (fits every model)
 uv run pytest
 ```
@@ -83,6 +106,8 @@ Every `gv report` needs a local NSE bhavcopy archive (`GV_LAKE_DIR` with `panel.
   build time and the page carries the returns and parameters, no price levels.
 - `src/gv/asym.py`: the asymmetry study: formation fits, frozen-parameter scoring on later years,
   refits for stability.
+- `src/gv/dists.py`: the distribution study (normal, Student-t, skewed-t inside GJR), with VaR
+  breaches.
 - `src/gv/reports.py`: README findings, reproducible with `gv report <topic>`.
 - Conventions: returns are daily log returns in percent; a variance for day t uses returns up to
   t − 1 only, and HAR features for day t use data up to t; volatility is annualised with the

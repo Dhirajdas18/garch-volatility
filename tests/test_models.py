@@ -183,3 +183,17 @@ def test_predictive_loglik_matches_arch_in_sample_for_t():
     ll = predictive_loglik(y, p, "GJR", 0).sum()
     assert np.isclose(ll, p["loglik"], rtol=1e-6)
     assert p["gamma_t"] is not None
+
+
+def test_predictive_density_matches_arch_loglik_for_every_distribution():
+    import numpy as np
+
+    from gv.models import fit, predictive_density
+
+    rng = np.random.default_rng(9)
+    y = rng.standard_t(5, 1500)
+    for dist in ("normal", "t", "skewt"):
+        p = fit(y, "GJR", dist)
+        ll, var, r = predictive_density(y, p, "GJR", 0)
+        assert np.isclose(ll.sum(), p["loglik"], rtol=1e-6)
+        assert 0.003 < np.mean(r < var) < 0.03
