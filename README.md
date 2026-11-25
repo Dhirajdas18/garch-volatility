@@ -20,7 +20,7 @@ fresh data by GitHub Actions.
 - [x] Estimation in practice: parameter stability, refit schedules, unreliable fits, common parameters
 - [x] HAR on range-based volatility and long-memory FIGARCH against GJR, EWMA and the 20-day variance
 - [x] Forecasts from 1 day to 3 months across the point-in-time top 200 (464 stocks) against the 20-day variance
-- [ ] Sizing and volatility targeting with GARCH against the 20-day standard deviation, after costs
+- [x] Sizing and volatility targeting with GARCH against the 20-day standard deviation, after costs
 - [ ] Market-wide stress and a risk-regime indicator
 
 ## Findings
@@ -139,13 +139,39 @@ is fitted to; scoring is QLIKE, with Newey-West t-statistics on the monthly diff
 - **HAR's edge over GARCH didn't hold on this target.** Scored against realised squared returns, HAR sat
   level with or slightly behind GJR at every horizon (finding 4's large HAR lead was against the range
   proxy it is fitted to; against squared returns it was 9% to GJR's 7% there).
+### 6. A better forecast didn't add return; it halved trading in sizing and hit a volatility target more closely
+
+<a href="docs/img/sizing_inverse_vol.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/sizing_inverse_vol.png"><img src="docs/img/sizing_inverse_vol.gif" alt="Turnover and worst drawdown of inverse-volatility weighting with five forecasts against equal weight" width="720"></picture></a>
+
+<a href="docs/img/sizing_target.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/sizing_target.png"><img src="docs/img/sizing_target.gif" alt="Distribution of each month's volatility for NIFTY held and NIFTY targeted at 12% with three forecasts" width="720"></picture></a>
+
+Two uses of the forecasts, decided at each month-end from 2017 and held for the month. A: each month's
+top-200 universe weighted in proportion to 1 / forecast volatility (the 22-day forecasts of finding 5),
+against equal weights, with delivery charges and slippage of 0.17% a side on the weights traded. B: NIFTY
+held at exposure 12% ÷ forecast volatility (at most 1.5×), the rest in cash at 6.5%, with GJR-t refitted
+each January on NIFTY's own history (finding 1), the 20-day standard deviation and EWMA. No dividends.
+
+- **Sizing by risk lowered risk, whatever the forecast.** Against equal weight (12.4% a year, volatility
+  20.8%, worst drawdown −44.8%), every inverse-volatility version had volatility 19.4–19.5% and a worst
+  drawdown of −38.7% to −39.6%, with Sharpes of 0.37–0.39 against 0.36.
+- **The better forecasts traded half as much.** Weights from the 20-day standard deviation turned over
+  3.92 times the portfolio a year, EWMA 2.78, GJR 1.81 and HAR 1.72 (equal weight 1.52); after costs GJR
+  made 12.7–12.8% a year against 12.4% with the 20-day.
+- **GJR came closest to a volatility target.** Targeting 12%, NIFTY's realised volatility was 11.9% with
+  GJR, 13.8% with the 20-day and 13.5% with EWMA (16.3% held); each month's volatility missed 12% by 4.6
+  points (root mean square) with GJR against 5.4 and 5.4, and passed 18% in 7% of months against 13% and
+  11% (17% held). GJR's forecasts moved least (standard deviation 6.0 points against 8.9).
+- **Targeting cut the worst fall, not the return.** NIFTY held made 11.6% a year with a −38.4% worst
+  drawdown; targeted with GJR, 10.2% with −23.8% (Sharpe 0.35 against 0.37); with the 20-day, 10.1% and
+  −27.7% (0.31).
 
 ## Quick start
 
 ```bash
 uv sync
 uv run python scripts/fetch_data.py         # Yahoo Finance -> data/prices.parquet
-GV_LAKE_DIR=... uv run gv report asymmetry  # also: distributions, refit, har, horizons
+GV_LAKE_DIR=... uv run gv report asymmetry  # also: distributions, refit, har, horizons,
+                                            # sizing
 uv run python scripts/build_site.py         # GARCH lab -> site/index.html (fits every model)
 uv run pytest
 ```
@@ -180,6 +206,8 @@ Every `gv report` needs a local NSE bhavcopy archive (`GV_LAKE_DIR` with `panel.
   filtered with fixed parameters, EWMA, the 20-day variance and QLIKE.
 - `src/gv/horizons.py`: monthly forecasts at 1-63 days for the point-in-time universe by five models
   re-estimated each January, and QLIKE scoring with Newey-West t-statistics.
+- `src/gv/sizing.py`: inverse-volatility weights with delivery costs, NIFTY GJR forecasts and a
+  monthly volatility target with cash.
 - `src/gv/reports.py`: README findings, reproducible with `gv report <topic>`.
 - Conventions: returns are daily log returns in percent; a variance for day t uses returns up to
   t − 1 only, and HAR features for day t use data up to t; volatility is annualised with the

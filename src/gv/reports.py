@@ -564,10 +564,166 @@ def report_horizons(out_dir: Path) -> dict:
     return res
 
 
+def report_sizing(out_dir: Path) -> dict:
+    """Does a better volatility forecast pay? (A) Inverse-volatility weights across each month's
+    top-200 universe from the 22-day forecasts of the horizons study, against equal weights,
+    after delivery costs; (B) a 12% volatility target on NIFTY (exposure capped at 1.5, cash
+    6.5%) with the 20-day, EWMA and GJR-t forecasts, January 2017 onward. Needs GV_LAKE_DIR. No
+    dividends."""
+    from gv.horizons import run
+    from gv.sizing import inverse_vol, monthly_returns, nifty_forecasts, vol_target
+    from gv.universe import lake_ohlc, load_universe
+
+    res = {}
+    ohlc = lake_ohlc()
+    df = run(ohlc, load_universe())
+    d = df[df["h"] == 22]
+    c = ohlc["adj_close"]
+    me = pd.Index(c.index.to_series().groupby(c.index.to_period("M")).max().to_numpy())
+    rets = monthly_returns(c, me)
+    fc = {
+        m: d[d["model"] == m].pivot_table(index="date", columns="symbol", values="forecast")
+        for m in d["model"].unique()
+    }
+    both = None
+    for f in fc.values():
+        both = f.notna() if both is None else both & f.notna()
+
+    def stats(x, per_year):
+        eq = (1 + x).cumprod()
+        yrs = (x.index[-1] - x.index[0]).days / 365.25 + 1 / per_year
+        vol = x.std() * np.sqrt(per_year)
+        return {
+            "cagr": eq.iloc[-1] ** (1 / yrs) - 1,
+            "vol": vol,
+            "sharpe": (x.mean() * per_year - 0.065) / vol,
+            "dd": float((eq / eq.cummax() - 1).min()),
+        }
+
+    a = {"equal weight": inverse_vol(fc["20-day"].where(both) * 0 + 1, rets)}
+    for m in ("20-day", "EWMA", "GJR (own)", "GJR (common)", "HAR"):
+        a[m] = inverse_vol(fc[m].where(both), rets)
+    sa = {}
+    for k, v in a.items():
+        sa[k] = stats(v["net"], 12) | {"turnover": float(v["turnover"].iloc[1:].mean() * 12)}
+        res[f"A, {k}"] = (
+            f"{100 * sa[k]['cagr']:.1f}% a year after costs, volatility {100 * sa[k]['vol']:.1f}%, "
+            f"Sharpe {sa[k]['sharpe']:.2f}, worst drawdown {100 * sa[k]['dd']:.1f}%, traded "
+            f"{sa[k]['turnover']:.2f}x the portfolio a year"
+        )
+    res["A, period"] = (
+        f"{a['equal weight']['net'].index[0]:%b %Y}-{a['equal weight']['net'].index[-1]:%b %Y}"
+    )
+
+    market = pd.read_parquet(Path(os.environ["GV_LAKE_DIR"]) / "market.parquet")
+    nifty = market.set_index("date")["nifty"].dropna()
+    r = (100 * np.log(nifty / nifty.shift(1))).dropna()
+    nme = pd.Index(nifty.index.to_series().groupby(nifty.index.to_period("M")).max().to_numpy())
+    nf = nifty_forecasts(r, nme)
+    rd = nifty.pct_change().dropna().loc[nf.index[0] :]
+    paths = {"buy and hold": pd.DataFrame({"ret": rd, "exposure": 1.0})}
+    for k in nf.columns:
+        paths[f"target, {k}"] = vol_target(rd, nf[k])
+    sb, mvol = {}, {}
+    for k, v in paths.items():
+        x = v["ret"]
+        mv = x.groupby(x.index.to_period("M")).std() * np.sqrt(252)
+        mvol[k] = mv
+        sb[k] = stats(x, 252) | {
+            "miss": float(np.sqrt(((mv - 0.12) ** 2).mean())),
+            "hot": float((mv > 0.18).mean()),
+        }
+        res[f"B, {k}"] = (
+            f"{100 * sb[k]['cagr']:.1f}% a year, volatility {100 * sb[k]['vol']:.1f}%, Sharpe "
+            f"{sb[k]['sharpe']:.2f}, worst drawdown {100 * sb[k]['dd']:.1f}%; monthly volatility "
+            f"off 12% by {100 * sb[k]['miss']:.1f} points (root mean square), above 18% in "
+            f"{sb[k]['hot']:.0%} of months"
+        )
+    res["B, forecast spread (sd of the monthly forecasts)"] = ", ".join(
+        f"{k} {100 * nf[k].std():.1f} points" for k in nf.columns
+    )
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.2))
+    names = ["equal weight", "20-day", "EWMA", "GJR (own)", "GJR (common)", "HAR"]
+    col = [
+        plots.MUTED
+        if k == "equal weight"
+        else plots.COLORS["20-day"]
+        if k == "20-day"
+        else plots.SERIES[0]
+        for k in names
+    ]
+    for ax, key, lab in (
+        (axes[0], "turnover", "traded, times the portfolio a year"),
+        (axes[1], "dd", "worst drawdown, %"),
+    ):
+        v = [sa[k][key] * (100 if key == "dd" else 1) for k in names]
+        ax.barh(names[::-1], v[::-1], color=col[::-1], height=0.55)
+        for i, x in enumerate(v[::-1]):
+            if key == "dd":
+                ax.text(
+                    x - 0.5, i, f"{x:.0f}%", va="center", ha="right", fontsize=8, color=plots.TEXT
+                )
+            else:
+                ax.text(x + 0.05, i, f"{x:.1f}", va="center", fontsize=8, color=plots.TEXT)
+        ax.set_xlabel(lab)
+    axes[1].set_xlim(-52, 0)
+    axes[1].set_yticks([])
+    fig.suptitle(
+        "Sizing by risk: every forecast cut drawdowns alike; GJR and HAR traded half as "
+        "much as the 20-day",
+        x=0.02,
+        ha="left",
+    )
+    fig.tight_layout()
+    plots.save(fig, out_dir, "sizing_inverse_vol")
+
+    fig, ax = plt.subplots(figsize=(10, 4.2))
+    keys = ["buy and hold", "target, 20-day", "target, EWMA", "target, GJR"]
+    data = [100 * mvol[k].dropna().to_numpy() for k in keys]
+    bp = ax.boxplot(
+        data,
+        widths=0.5,
+        showfliers=True,
+        patch_artist=True,
+        flierprops={
+            "markersize": 3,
+            "markerfacecolor": plots.MUTED,
+            "markeredgecolor": plots.MUTED,
+        },
+        medianprops={"color": plots.TEXT},
+    )
+    for patch, k in zip(bp["boxes"], keys, strict=True):
+        patch.set_facecolor(plots.SERIES[0] if k.endswith("GJR") else plots.MUTED)
+        patch.set_alpha(0.6)
+    ax.axhline(12, color=plots.TEXT_2, lw=0.8, ls="--")
+    ax.set_xticks(
+        range(1, 5),
+        ["NIFTY held", "target with\n20-day", "target with\nEWMA", "target with\nGJR-t"],
+    )
+    ax.set_ylabel("each month's volatility, % a year")
+    ax.set_ylim(0, 60)
+    ax.set_title(
+        f"NIFTY, aiming at 12% (dashed), {rd.index[0]:%b %Y}-{rd.index[-1]:%b %Y}",
+        fontsize=10,
+        fontweight="normal",
+        loc="left",
+    )
+    fig.suptitle(
+        "Volatility targeting: GJR came closest to the target and cut the worst fall most",
+        x=0.02,
+        ha="left",
+    )
+    fig.tight_layout()
+    plots.save(fig, out_dir, "sizing_target")
+    return res
+
+
 REPORTS: dict[str, Callable[[Path], dict]] = {
     "asymmetry": report_asymmetry,
     "distributions": report_distributions,
     "refit": report_refit,
     "har": report_har,
     "horizons": report_horizons,
+    "sizing": report_sizing,
 }
