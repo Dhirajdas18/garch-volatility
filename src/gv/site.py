@@ -57,6 +57,7 @@ def lab_data(adj: pd.DataFrame, years: int = YEARS) -> dict:
     per_year = (len(dates) - 1) / ((dates[-1] - dates[0]).days / 365.25)
     data, dropped, failed = {}, [], []
     t0 = time.perf_counter()
+    raw = {}
     for s in [INDEX] + SYMBOLS:
         if s not in r or r[s].notna().sum() < MIN_DAYS:
             dropped.append(s)
@@ -65,12 +66,23 @@ def lab_data(adj: pd.DataFrame, years: int = YEARS) -> dict:
         start = int(np.argmax(col.notna().to_numpy()))
         ints = np.round(col.iloc[start:].fillna(0.0).to_numpy() * SCALE).astype(int)
         pct = ints / (SCALE / 100)
+        own = {}
+        for m in models.MODELS:
+            try:
+                f = models.fit(pct, m, DIST)
+            except Exception:  # one bad series must not stop the weekly build
+                f = None
+            own[m] = f if f is not None and models.sane(f, m, float(pct.var())) else None
+        raw[s] = (start, ints, pct, own)
+    good = {m: [o[m] for *_, o in raw.values() if o[m] is not None] for m in models.MODELS}
+    for s, (start, ints, pct, own) in raw.items():
         fits = {}
         for m in models.MODELS:
-            f = models.fit(pct, m, DIST)
-            fits[m] = {k: _round(f[k]) for k in KEEP} | {"converged": f["converged"]}
-            if not f["converged"]:
+            f, fallback = own[m], False
+            if f is None:  # unreliable or failed: common parameters scaled to this stock (gv/03)
+                f, fallback = models.common_params(good[m], m, pct, DIST), True
                 failed.append(f"{s} {m}")
+            fits[m] = {k: _round(f[k]) for k in KEEP} | {"converged": True, "fallback": fallback}
         data[s] = {"start": start, "r": ints.tolist(), "fit": fits}
     seconds = time.perf_counter() - t0
     return {
@@ -107,8 +119,11 @@ down days only. EGARCH works on log variance, with γ times the signed surprise,
 rise of the same size can move volatility differently.</li>
 <li>Estimation: maximum likelihood with Student-t shocks scaled to unit variance, using the
 <code>arch</code> package, on percent returns, refitted on every weekly rebuild. All parameters
-are fitted on the same five years the charts show, so the charts are in-sample. Fits that did not
-converge: {failed}.</li>
+are fitted on the same five years the charts show, so the charts are in-sample. A fit that fails,
+doesn't converge or lands on an edge (β below 0.5, persistence of 0.999 or more, ν at or below
+2.1 or above 50, a daily mean beyond ±1%, or a long-run variance more than 25 times the sample's)
+is replaced by common parameters: the median of the sound fits for that model, scaled to the
+stock's own variance. Replaced this week: {failed}.</li>
 <li>Forecasts: GARCH and GJR forecasts are exact, with each later day moving toward the long-run
 level at the rate of the persistence. GJR’s asymmetry term counts at half weight, because under a
 symmetric t half of the shocks’ variance comes from down days. EGARCH has no closed form beyond

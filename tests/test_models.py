@@ -238,3 +238,51 @@ def test_tvalue_returns_none_when_the_hessian_is_singular():
 
     assert _tvalue(Singular(), "gamma[1]") is None
     assert _tvalue(Singular(), "missing") is None
+
+
+def test_sane_rejects_degenerate_fits_and_common_params_target_the_variance():
+    import numpy as np
+
+    from gv.models import common_params, long_run_variance, sane
+
+    rng = np.random.default_rng(4)
+    y = rng.standard_t(6, 1500)
+    good = {
+        "model": "GJR",
+        "dist": "t",
+        "mu": 0.05,
+        "omega": 0.05,
+        "alpha": 0.05,
+        "gamma": 0.05,
+        "beta": 0.88,
+        "nu": 6.0,
+        "lambda": None,
+        "converged": True,
+        "asym_weight": 0.5,
+        "abs_mean": 0.75,
+    }
+    from gv.models import persistence
+
+    good["persistence"] = persistence(good, "GJR")
+    assert sane(good, "GJR", float(y.var()))
+    bad = dict(good, mu=-34.0)
+    assert not sane(bad, "GJR", float(y.var()))
+    egarch = {
+        "model": "EGARCH",
+        "dist": "t",
+        "mu": 0.0,
+        "omega": 50.0,
+        "alpha": -25.5,
+        "gamma": 110.6,
+        "beta": 0.0,
+        "nu": 2.05,
+        "lambda": None,
+        "converged": True,
+        "asym_weight": 0.5,
+        "abs_mean": 0.9,
+        "persistence": 0.0,
+    }
+    assert not sane(egarch, "EGARCH", float(y.var()))
+    for model in ("GARCH", "GJR", "EGARCH"):
+        c = common_params([good, dict(good, alpha=0.07)], model, y)
+        assert np.isclose(long_run_variance(c, model), y.var(), rtol=1e-9)

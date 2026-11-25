@@ -1,12 +1,13 @@
 """Does a better volatility forecast pay? Two uses, monthly, after costs.
 
 A. Sizing by risk: each month-end, hold that day's top-200 universe with weights in proportion to
-   1 / forecast volatility (22-day forecasts from gv.horizons), against equal weights. A stock with
-   no price at the next month-end earns 0 that month (sold at its last price). Costs: delivery
-   charges and slippage per rupee traded on each side (`COST`), on the change from the drifted
-   weights.
+   1 / forecast volatility (22-day forecasts from gv.horizons), against equal weights. A stock that
+   stops trading during a month earns its return to its last price, then 0 (sold there). Costs:
+   delivery charges and slippage per rupee traded on each side (`COST`), on the change from the
+   drifted weights.
 B. Volatility targeting: hold NIFTY (price index) at exposure min(cap, target / forecast volatility)
-   for the next month, the rest in cash at 6.5% a year; costs per rupee of exposure changed.
+   for the next month, the rest in cash at 6.5% a year (exposure above 1 is financed at the same
+   flat rate, with no spread); costs per rupee of exposure changed.
 """
 
 import numpy as np

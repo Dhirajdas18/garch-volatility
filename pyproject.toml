@@ -1,7 +1,7 @@
 [project]
 name = "garch-volatility"
 version = "0.1.0"
-description = "Volatility forecasting for NSE stocks beyond plain GARCH(1,1): asymmetric GARCH, error distributions, HAR and component models, multi-horizon forecasts and sizing, with a live GARCH lab."
+description = "Volatility forecasting for NSE stocks beyond plain GARCH(1,1): asymmetric GARCH, error distributions, HAR and long-memory models, multi-horizon forecasts and sizing, with a live GARCH lab."
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Dhirajdas18" }]

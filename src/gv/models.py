@@ -83,8 +83,60 @@ def long_run_variance(params: dict, model: str) -> float:
         return math.nan
     if model == "EGARCH":
         drift = params["omega"] + params["alpha"] * (params["abs_mean"] - SQRT2_OV_PI)
-        return math.exp(drift / (1 - p))
+        return _exp(drift / (1 - p))
     return params["omega"] / (1 - p)
+
+
+def _exp(x: float) -> float:
+    """exp that returns inf instead of raising OverflowError (degenerate EGARCH fits)."""
+    try:
+        return math.exp(x)
+    except OverflowError:
+        return math.inf
+
+
+def sane(params: dict, model: str, sample_var: float) -> bool:
+    """A fit fit for publishing: converged, the reliability rule of gv.refit (beta at least 0.5,
+    persistence below 0.999, nu at most 50), nu above 2.1, a daily mean within ±1%, and a finite
+    long-run variance within 25 times the sample variance."""
+    from gv.refit import unreliable
+
+    if not params.get("converged", False) or unreliable(params):
+        return False
+    if params["nu"] is not None and params["nu"] <= 2.1:
+        return False
+    if abs(params["mu"]) > 1.0:
+        return False
+    lr = long_run_variance(params, model)
+    return bool(math.isfinite(lr) and 0 < lr < 25 * sample_var)
+
+
+DEFAULT_PARAMS = {
+    "GARCH": {"alpha": 0.08, "gamma": 0.0, "beta": 0.90, "nu": 6.0},
+    "GJR": {"alpha": 0.05, "gamma": 0.06, "beta": 0.90, "nu": 6.0},
+    "EGARCH": {"alpha": 0.15, "gamma": -0.03, "beta": 0.97, "nu": 6.0},
+}
+
+
+def common_params(fits: list[dict], model: str, returns_pct, dist: str = "t") -> dict:
+    """Cross-sectional median alpha, gamma, beta, nu of `fits` (DEFAULT_PARAMS if there are none),
+    with mu = the stock's mean and omega set so the long-run variance equals the stock's sample
+    variance (variance targeting)."""
+    y = np.asarray(returns_pct, dtype=float)
+    if fits:
+        med = {k: float(np.median([f[k] for f in fits])) for k in ("alpha", "gamma", "beta", "nu")}
+    else:  # no sound fit to take a median from: textbook values
+        med = DEFAULT_PARAMS[model]
+    p = {"model": model, "dist": dist, "mu": float(y.mean()), "lambda": None, "converged": True}
+    p |= med | dist_moments(dist, med["nu"], None)
+    var = float(y.var())
+    if model == "EGARCH":
+        p["omega"] = (1 - p["beta"]) * math.log(var) - p["alpha"] * (p["abs_mean"] - SQRT2_OV_PI)
+    else:
+        p["persistence"] = persistence(p, model)
+        p["omega"] = var * (1 - p["persistence"])
+    p["persistence"] = persistence(p, model)
+    return p
 
 
 def _tvalue(res, name: str) -> float | None:
@@ -158,7 +210,7 @@ def conditional_variance(returns_pct, params: dict, model: str) -> np.ndarray:
             if t:
                 z = e[t - 1] / math.sqrt(s2[t - 1])
                 lns = om + a * (abs(z) - SQRT2_OV_PI) + g * z + b * lns
-            s2[t] = math.exp(lns)
+            s2[t] = _exp(lns)
         return s2
     s2[0] = om + a * bc + g * 0.5 * bc + b * bc
     for t in range(1, n):
@@ -197,7 +249,7 @@ def forecast_variance(state: dict, params: dict, model: str, horizon: int) -> np
         for h in range(horizon):
             if h:
                 lns = drift + b * lns
-            out[h] = math.exp(lns)
+            out[h] = _exp(lns)
         return out
     out[0] = om + (a + (g if e < 0 else 0.0)) * e * e + b * s2
     p = persistence(params, model)

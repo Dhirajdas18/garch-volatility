@@ -82,7 +82,8 @@ def run(
         four = [p for (s, n), (p, _) in year_fits.items() if n == "rolling 4y"]
         med = {k: float(np.median([p[k] for p in four])) for k in ("alpha", "gamma", "beta", "nu")}
         for s, r in returns.items():
-            plans = {"frozen": (frozen[s], _window(2014, 2019))}
+            # frozen: 2014-2019 parameters, recursion warmed through every day before year Y
+            plans = {"frozen": (frozen[s], _window(2014, year - 1))}
             for name in ("expanding", "rolling 4y", "rolling 2y"):
                 if (s, name) in year_fits:
                     plans[name] = year_fits[(s, name)]

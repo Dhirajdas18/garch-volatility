@@ -5,7 +5,8 @@ Formation = calendar years `fit_years`, test = `test_years`. Stocks are the univ
 the formation's last day with returns on at least `min_cover` of the formation days. Each is fitted
 on the formation with Student-t shocks, then scored on the test days with every parameter frozen
 (the variance recursion runs through the formation days first, so it is warmed up). Stocks that stop
-trading are scored on the test days they have.
+trading are scored on the test days they have if they have at least 250; two of the formation
+stocks have fewer and are left out (selection on future survival, small).
 """
 
 import numpy as np

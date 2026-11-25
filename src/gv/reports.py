@@ -274,9 +274,11 @@ def report_distributions(out_dir: Path) -> dict:
             extra += f", nu {nf[d]['nu']:.1f}"
         if nf[d]["lambda"] is not None:
             extra += f", lambda {nf[d]['lambda']:+.3f}"
+        kup = _kupiec_fails(nf[d]["breach1"], nf["n_test"], 0.01)
         res[f"NIFTY, {d}"] = (
             f"log-likelihood a day {nf[d]['oos_ll']:.4f}; 1% VaR breached "
-            f"{100 * nf[d]['breach1']:.2f}% of {nf['n_test']} days{extra}"
+            f"{100 * nf[d]['breach1']:.2f}% of {nf['n_test']} days (Kupiec "
+            f"{'rejects' if kup else 'does not reject'}){extra}"
         )
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.2), gridspec_kw={"width_ratios": [1, 1.2]})
@@ -464,6 +466,10 @@ def report_har(out_dir: Path) -> dict:
         res[f"QLIKE vs the 20-day variance, {name}"] = ", ".join(
             f"{k} {100 * (q[tgt][k].mean() / base - 1):+.0f}%" for k in FORECASTS[:-1]
         )
+    res["range proxy / squared return, 2020-2026 (median stock)"] = (
+        f"{st['proxy_over_r2'].median():.3f} (10th-90th percentile "
+        f"{st['proxy_over_r2'].quantile(0.1):.3f}-{st['proxy_over_r2'].quantile(0.9):.3f})"
+    )
     res["forecast level / proxy level (median)"] = ", ".join(
         f"{k} {st[f'{k}_bias'].median():.2f}" for k in FORECASTS
     )
@@ -776,6 +782,12 @@ def report_regime(out_dir: Path) -> dict:
     res["beyond NIFTY's GJR (partial rank correlation with next volatility)"] = ", ".join(
         f"{k} {v:.2f}" for k, v in part.items()
     )
+    for given in ("India VIX", "NIFTY 20-day"):
+        res[f"beyond {given} (partial rank correlation with next volatility)"] = ", ".join(
+            f"{k} {partial_rank_corr(d, k, 'next vol', given):.2f}"
+            for k in ("median ratio", "stress share")
+        )
+    res["note on terciles"] = "cut-offs from the whole period (in-sample grouping)"
     d["tercile"] = pd.qcut(d["median ratio"], 3, labels=["calm", "middle", "stressed"])
     g = d.groupby("tercile", observed=True)
     for name, row in g.agg(

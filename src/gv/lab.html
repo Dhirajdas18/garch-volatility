@@ -82,7 +82,7 @@ const GL = $data;
       ["1-day 99% VaR on ₹1 lakh", rupees(var99)],
     ];
     el("gl-stats").innerHTML = stats.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
-    const warn = p.converged ? "" : " The fit did not converge; treat these numbers with care.";
+    const warn = p.fallback ? " This stock's own fit was unreliable, so it is shown with common parameters (the median across stocks) scaled to its own volatility." : "";
     el("gl-note").textContent = `${s}, ${model} with Student-t shocks, fitted on ${day(dates[0])} to ${GL.last}: ` +
       `tomorrow’s volatility ${pct(ann(f[0]))} a year against ${pct(Math.sqrt(GL.per_year) * sd20[n - 1])} from the last 20 days; ` +
       `over the next ${h} days ${pct(ann(avgTo[h - 1]))}.${warn}`;

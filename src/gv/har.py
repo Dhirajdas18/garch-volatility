@@ -1,8 +1,10 @@
 """HAR on range-based daily variance against GARCH-family and simple forecasts, one day ahead.
 
 Daily "realised" variance without intraday data: the Garman-Klass range estimator for the trading
-day plus the squared overnight gap, ln(open / previous close)^2, in percent squared. It is noisy but
-unbiased enough to rank forecasts (Patton's QLIKE ranks correctly with any unbiased proxy).
+day plus the squared overnight gap, ln(open / previous close)^2, in percent squared. It is less
+noisy than the squared return but runs above it on average (median 1.17 times for these stocks in
+2020-2026), and HAR is fitted to it, so rankings against it favour HAR; rankings against the
+squared return are the fairer test.
 
 Models, all fitted on the formation years and frozen through the test years:
 - HAR (log): log rv(t+1) = b0 + b1 log rv(t) + b2 log mean5(t) + b3 log mean22(t), by least squares;
@@ -111,6 +113,7 @@ def study_stock(o, h, lo, c, form_end, test_start) -> dict | None:
     rvt, r2 = rv.loc[frame.index].to_numpy(), (r.loc[frame.index] ** 2).to_numpy()
     r2 = np.clip(r2, 1e-3 * np.median(rvt), None)
     out = {
+        "proxy_over_r2": float(rvt.mean() / (r.loc[frame.index] ** 2).mean()),
         "days": len(frame),
         "converged": ok1 and ok2,
         "b_daily": hp["b"][1],

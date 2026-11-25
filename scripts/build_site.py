@@ -22,7 +22,7 @@ def main() -> None:
         f"built in {time.perf_counter() - t0:.1f} s"
     )
     print(f"dropped (under the minimum history): {data['dropped'] or 'none'}")
-    print(f"fits that did not converge: {data['failed'] or 'none'}")
+    print(f"fits replaced by common parameters: {data['failed'] or 'none'}")
 
 
 if __name__ == "__main__":

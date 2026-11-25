@@ -4,7 +4,7 @@
 [![Dashboard](https://github.com/Dhirajdas18/garch-volatility/actions/workflows/pages.yml/badge.svg)](https://dhirajdas18.github.io/garch-volatility/)
 
 Volatility forecasting for NSE stocks beyond plain GARCH(1,1): asymmetric models, fat-tailed
-shocks, HAR and component models, and forecasts from one day to three months, each tested against
+shocks, HAR and long-memory models, and forecasts from one day to three months, each tested against
 the plain 20-day standard deviation. The findings use a point-in-time universe of the 200
 most-traded stocks from a local NSE bhavcopy archive (from 2013), delisted ones included.
 
@@ -45,12 +45,12 @@ NIFTY is fitted the same way. Archive prices, no dividends.
   term at 0.140 (t 3.7): a 4% fall lifted tomorrow's volatility to 26.7% a year, a 4% rise left it at 12.6%.
   Refitted on 2020–2026 the bad-news term was 0.125.
 - **On unseen years, asymmetry helped a little.** Against plain GARCH, EGARCH scored better for 75% of
-  stocks (median +0.0021 log-likelihood a day, t 6.1 across stocks) and GJR for 63% (+0.0004, t 3.0).
+  stocks (median +0.0021 log-likelihood a day) and GJR for 63% (+0.0004).
   For NIFTY, GJR gained +0.0094 a day while EGARCH lost 0.0053.
 - **A stock's own asymmetry barely repeated.** The rank correlation between each stock's GJR bad-news
   term in 2014–2019 and in 2020–2026 was 0.29; in-sample, AIC preferred GJR for 42% of stocks and BIC
   for 14%.
-### 2. Every stock had fat tails; Student-t shocks fixed the 1% loss, skew added nothing for stocks
+### 2. Every stock had fat tails; Student-t shocks brought the average 1% breach rate to target
 
 <a href="docs/img/distributions.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/distributions.png"><img src="docs/img/distributions.gif" alt="Fitted Student-t degrees of freedom across 172 stocks, and 1% VaR breach rates on 2020-2026 for three shock distributions" width="720"></picture></a>
 
@@ -68,7 +68,8 @@ whether each stock's breach rate is consistent with the promise.
   normal is too wide in the middle and too thin in the tails.
 - **Skew helped NIFTY, not stocks.** Skewed-t matched Student-t for stocks (better for 48%, median
   −0.00001 a day; λ was positive for 90%, a slightly longer right tail). For NIFTY, λ was −0.079 and
-  its 1% breach rate fell from 1.82% to 1.58%.
+  its 1% breach rate fell from 1.82% to 1.58%, still too often (Kupiec rejects both). For stocks,
+  skewed-t breached the 1% level more (1.18%) but the 5% level closer to target (5.07% against 4.53%).
 - **The distribution changes the tails, not the volatility.** Student-t and normal fits gave
   volatility paths with a median correlation of 0.982 and the same level (ratio 1.002).
 - **Six-year-old parameters were still off for many stocks.** Even with Student-t, Kupiec rejected the
@@ -85,15 +86,15 @@ equals its own 4-year variance). Each is scored through the year with frozen par
 stock-years). A fit is called unreliable if it didn't converge, put β below 0.5, put persistence at or
 above 0.999, or put ν above 50.
 
-- **More data beat fresher data.** Refitting each year on everything since 2014 scored +0.0038
-  log-likelihood a day above the frozen fit (better for 81% of stocks) and cut Kupiec rejections of the
-  1% value at risk from 26% of stocks to 15%. Four-year windows gained +0.0007; two-year windows lost
-  0.0059.
+- **More data beat fresher data.** Refitting each year on everything since 2014 scored +0.0036
+  log-likelihood a day above the frozen fit (better for 77% of stocks) and cut Kupiec rejections of the
+  1% value at risk from 27% of stocks to 15%. Four-year windows gained +0.0005; two-year windows lost
+  0.0062.
 - **Short windows gave unreliable fits.** 30% of two-year fits were unreliable (24% put β below 0.5),
   16% of four-year fits and 6% of expanding ones; none failed to converge. Persistence moved a median
   0.071 a year with two-year windows, 0.024 with four and 0.009 with expanding.
 - **Common parameters were the most reliable.** One shared set of α, γ, β and ν, scaled to each
-  stock's own variance, scored +0.0030 (better than frozen for 59%) with the fewest Kupiec rejections
+  stock's own variance, scored +0.0027 (better than frozen for 57%) with the fewest Kupiec rejections
   (12%) and a 1.02% breach rate.
 ### 4. HAR on daily ranges forecast tomorrow best; the 20-day variance was the worst of five
 
@@ -103,7 +104,7 @@ Without intraday prices, each day's "realised" variance is estimated from its op
 (Garman-Klass) plus the squared overnight gap. HAR forecasts tomorrow's value from today's, the last
 week's and the last month's averages (in logs, by least squares). It is compared with GJR and FIGARCH
 (a long-memory GARCH, standing in for a component model, which arch lacks), both with Student-t shocks,
-EWMA (λ 0.94) and the 20-day variance of returns. All are fitted on 2014–2019 and frozen; the same 172
+EWMA (λ 0.94) and the 20-day variance of returns. All are fitted on 2013–2019 and frozen; the same 172
 stocks are forecast one day ahead over 2020–2026 (median 1,704 days) and scored by QLIKE, the standard
 volatility loss, against the range-based variance and, because HAR is fitted to that very proxy, also
 against the squared return.
@@ -115,7 +116,10 @@ against the squared return.
   returns), GJR 28% (7%), EWMA 20% (5%).
 - **The 20-day variance came last.** Every other model beat it for 98–100% of stocks, on either target.
 - **HAR spread its weight evenly.** Median weights on the log of the last day, week and month: 0.23,
-  0.23 and 0.22. Every model's average forecast sat below the proxy's average (ratios 0.85–0.92).
+  0.23 and 0.22.
+- **The range proxy runs high.** Over 2020–2026 it averaged 1.17 times the squared return (median stock;
+  1.05–1.37 across stocks), so every model's average forecast sat below it (ratios 0.85–0.92), and it
+  favours HAR, which is fitted to it; the squared-return ranking is the fairer one.
 ### 5. Across 464 stocks and four horizons, GJR with common parameters halved the 20-day variance's loss at three months
 
 <a href="docs/img/horizons.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/horizons.png"><img src="docs/img/horizons.gif" alt="Average QLIKE of EWMA, GJR with own and common parameters, and HAR relative to the 20-day variance, at 1, 5, 22 and 63 days" width="720"></picture></a>
@@ -136,9 +140,10 @@ is fitted to; scoring is QLIKE, with Newey-West t-statistics on the monthly diff
   better in 88% of months), GJR with own fits 48% and HAR 47%; EWMA only 28%.
 - **Common parameters matched or beat each stock's own fit** at every horizon (−10%, −22%, −38%, −52%
   against −10%, −22%, −37%, −48%), with nothing to estimate per stock but its variance level.
-- **HAR's edge over GARCH didn't hold on this target.** Scored against realised squared returns, HAR sat
-  level with or slightly behind GJR at every horizon (finding 4's large HAR lead was against the range
-  proxy it is fitted to; against squared returns it was 9% to GJR's 7% there).
+- **HAR sat level with or slightly behind GJR.** In this set-up (yearly refits, 464 stocks, HAR in
+  levels on squared returns) HAR was 9% better than the 20-day variance one day ahead against GJR's
+  10%, and level or behind at every horizon; finding 4's set-up (frozen 2013–2019 fits, 172 stocks,
+  log-HAR) had HAR slightly ahead on squared returns (9% against 7%).
 ### 6. A better forecast didn't add return; it halved trading in sizing and hit a volatility target more closely
 
 <a href="docs/img/sizing_inverse_vol.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/sizing_inverse_vol.png"><img src="docs/img/sizing_inverse_vol.gif" alt="Turnover and worst drawdown of inverse-volatility weighting with five forecasts against equal weight" width="720"></picture></a>
@@ -160,10 +165,12 @@ each January on NIFTY's own history (finding 1), the 20-day standard deviation a
 - **GJR came closest to a volatility target.** Targeting 12%, NIFTY's realised volatility was 11.9% with
   GJR, 13.8% with the 20-day and 13.5% with EWMA (16.3% held); each month's volatility missed 12% by 4.6
   points (root mean square) with GJR against 5.4 and 5.4, and passed 18% in 7% of months against 13% and
-  11% (17% held). GJR's forecasts moved least (standard deviation 6.0 points against 8.9).
-- **Targeting cut the worst fall, not the return.** NIFTY held made 11.6% a year with a −38.4% worst
-  drawdown; targeted with GJR, 10.2% with −23.8% (Sharpe 0.35 against 0.37); with the 20-day, 10.1% and
-  −27.7% (0.31).
+  11% (17% held). GJR's forecasts moved least (standard deviation 6.0 points against 8.9 for the
+  20-day and 8.3 for EWMA).
+- **Targeting cut the worst fall far more than the return.** NIFTY held made 11.6% a year with a
+  −38.4% worst drawdown; targeted with GJR, 10.2% with −23.8% (Sharpe 0.35 against 0.37); with the
+  20-day, 10.1% and −27.7% (0.31). Exposure above 1× is financed at the flat 6.5% cash rate, which
+  slightly flatters targeting.
 ### 7. Market-wide stress: India VIX warned best; stock breadth added something NIFTY's own GARCH missed
 
 <a href="docs/img/regime_timeline.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/regime_timeline.png"><img src="docs/img/regime_timeline.gif" alt="Daily share of the top 200 with GJR volatility above 1.5 times normal, and NIFTY below its running peak, 2017-2026" width="720"></picture></a>
@@ -183,12 +190,12 @@ days.
 - **India VIX warned best.** Its rank correlation with next month's NIFTY volatility was 0.67, against
   0.55 for NIFTY's 20-day volatility, 0.53 for the median ratio, 0.51 for NIFTY's GJR and 0.47 for the
   stress share.
-- **Breadth added something NIFTY's own model missed.** After removing what NIFTY's GJR forecast already
-  said, the median ratio still ranked next month's volatility at 0.31 and the stress share at 0.28;
-  India VIX at 0.52.
+- **Breadth added something NIFTY's own model missed, but little beyond VIX.** After removing what
+  NIFTY's GJR forecast already said, the median ratio still ranked next month's volatility at 0.31 and
+  the stress share at 0.28 (India VIX 0.52); after removing India VIX, only 0.14 and 0.16.
 - **Stress signalled risk, not direction.** Split by the median ratio into thirds, NIFTY's next 22 days
   after the most stressed month-ends had 18.5% volatility and a −4.9% average worst fall, against 10.5%
-  and −3.1% after the calmest, but returned +1.5% against +0.8%.
+  and −3.1% after the calmest, but returned +1.5% against +0.8% (thirds cut on the whole period).
 
 ## Quick start
 
@@ -237,11 +244,16 @@ Every `gv report` needs a local NSE bhavcopy archive (`GV_LAKE_DIR` with `panel.
   month-end comparison with India VIX and NIFTY's forecasts.
 - `src/gv/reports.py`: README findings, reproducible with `gv report <topic>`.
 - Conventions: returns are daily log returns in percent; a variance for day t uses returns up to
-  t − 1 only, and HAR features for day t use data up to t; volatility is annualised with the
-  window's own trading days a year, not a fixed 252. GJR and GARCH forecasts are exact; EGARCH
+  t − 1 only, and HAR features for day t use data up to t; volatility is annualised with √252 in
+  findings 6–7, √247 (the archive's trading days a year) in finding 1's news-impact figures, and
+  the window's own trading days in the lab. GJR and GARCH forecasts are exact; EGARCH
   forecasts beyond one day are the exp of the expected log variance (no closed form for the
   mean), which understates the mean variance at long horizons.
-- Survivorship: the findings use the point-in-time universe, delisted stocks included. The lab
+- Data: the archive's prices are adjusted for splits and bonuses only, not dividends (NIFTY is a price
+  index); this changes little for volatility.
+- Survivorship: the findings use the point-in-time universe, delisted stocks included; findings 1–4
+  keep stocks with at least 250 returns after 2019 (two of the 2019 set fall out), and the yearly
+  common parameters pool every stock that is ever in the top 200 from 2017. The lab
   uses today's NIFTY 200 from Yahoo, and its parameters are fitted on the same five years its
   charts show, so the lab is in-sample and survivorship-biased.
 - Charts: one validated palette; README charts are animated GIFs with a static fallback for
