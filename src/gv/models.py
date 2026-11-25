@@ -123,6 +123,7 @@ def fit(returns_pct, model: str = "GARCH", dist: str = "t") -> dict:
         "bic": float(res.bic),
         "converged": bool(res.convergence_flag == 0),
         "n": len(y),
+        "gamma_t": float(res.tvalues["gamma[1]"]) if "gamma[1]" in p else None,
     }
     out.update(dist_moments(dist, out["nu"], out["lambda"]))
     out["persistence"] = persistence(out, model)
@@ -237,3 +238,24 @@ def har_features(daily_var: pd.Series) -> pd.DataFrame:
             "monthly": v.rolling(22).mean(),
         }
     )
+
+
+def predictive_loglik(returns_pct, params: dict, model: str, start: int) -> np.ndarray:
+    """Log density of each day's return from `start` on under the model with `params` frozen:
+    the variance recursion runs over all of `returns_pct` (so it is warmed up on the earlier days)
+    and each day's density uses only the variance known the day before. Normal or Student-t
+    (unit-variance t scaled to the conditional variance); skewed-t not supported here."""
+    from scipy.stats import norm
+    from scipy.stats import t as student_t
+
+    y = np.asarray(returns_pct, dtype=float)
+    h = conditional_variance(y, params, model)
+    e = (y - params["mu"])[start:]
+    sd = np.sqrt(h[start:])
+    if params["dist"] == "normal":
+        return norm.logpdf(e, scale=sd)
+    if params["dist"] == "t":
+        nu = params["nu"]
+        scale = sd * np.sqrt((nu - 2) / nu)
+        return student_t.logpdf(e, nu, scale=scale)
+    raise ValueError("predictive_loglik supports normal and t")

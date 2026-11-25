@@ -15,7 +15,7 @@ fresh data by GitHub Actions.
 
 ## Features
 
-- [ ] Asymmetric GARCH (GJR, EGARCH) across 200 stocks
+- [x] Asymmetric GARCH (GJR, EGARCH) across 172 stocks, fitted on 2014–2019 and scored on 2020–2026
 - [ ] Error distributions: normal, Student-t, skewed-t
 - [ ] Estimation in practice: parameter stability, refit schedules, failed fits
 - [ ] HAR on range-based volatility and component GARCH
@@ -25,14 +25,38 @@ fresh data by GitHub Actions.
 
 ## Findings
 
-Findings are added as each study is completed.
+### 1. Bad news raised volatility more than good news; strongly for NIFTY, weakly for single stocks
+
+<a href="docs/img/asymmetry_news.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/asymmetry_news.png"><img src="docs/img/asymmetry_news.gif" alt="NIFTY news-impact curves for GARCH and GJR, and the distribution of the bad-news t-statistic across 172 stocks" width="720"></picture></a>
+
+<a href="docs/img/asymmetry_oos.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/asymmetry_oos.png"><img src="docs/img/asymmetry_oos.gif" alt="Out-of-sample log-likelihood of GJR and EGARCH against GARCH across stocks, and each stock's GJR asymmetry in two periods" width="720"></picture></a>
+
+GJR adds a term that only bad days (returns below the mean) feed into tomorrow's variance; EGARCH
+models the log of the variance with a separate response to the sign of the shock. Each stock in the
+universe's top 200 on 31 December 2019 with returns on 95% of 2014–2019 days (172 stocks) is fitted on
+2014–2019 with Student-t shocks, then scored on 2020–2026 with every parameter frozen by the
+log-likelihood of each day's return given the variance known the day before (median 1,704 days).
+NIFTY is fitted the same way. Archive prices, no dividends.
+
+- **Bad news counted for more in most stocks, but rarely clearly.** GJR's bad-news term was positive
+  for 84% of stocks (median 0.040 against a symmetric term of 0.069), but its t-statistic passed 2 for
+  only 13%. EGARCH's asymmetry pointed the same way for 81%, past t −2 for 23%.
+- **For NIFTY it was almost all bad news.** GJR put NIFTY's symmetric term at 0.000 and its bad-news
+  term at 0.140 (t 3.7): a 4% fall lifted tomorrow's volatility to 27% a year, a 4% rise left it at 13%.
+  Refitted on 2020–2026 the bad-news term was 0.125.
+- **On unseen years, asymmetry helped a little.** Against plain GARCH, EGARCH scored better for 75% of
+  stocks (median +0.0021 log-likelihood a day, t 6.1 across stocks) and GJR for 63% (+0.0004, t 3.0).
+  For NIFTY, GJR gained +0.0094 a day while EGARCH lost 0.0053.
+- **A stock's own asymmetry barely repeated.** The rank correlation between each stock's GJR bad-news
+  term in 2014–2019 and in 2020–2026 was 0.29; in-sample, AIC preferred GJR for 42% of stocks and BIC
+  for 14%.
 
 ## Quick start
 
 ```bash
 uv sync
 uv run python scripts/fetch_data.py         # Yahoo Finance -> data/prices.parquet
-GV_LAKE_DIR=... uv run gv report <topic>    # topics are added with each study
+GV_LAKE_DIR=... uv run gv report asymmetry  # needs a local NSE archive
 uv run python scripts/build_site.py         # GARCH lab -> site/index.html (fits every model)
 uv run pytest
 ```
@@ -57,6 +81,8 @@ Every `gv report` needs a local NSE bhavcopy archive (`GV_LAKE_DIR` with `panel.
   set by `GV_LAKE_DIR`; only results are committed.
 - `src/gv/site.py`: the GARCH lab, one static Plotly page; every stock and model is fitted at
   build time and the page carries the returns and parameters, no price levels.
+- `src/gv/asym.py`: the asymmetry study: formation fits, frozen-parameter scoring on later years,
+  refits for stability.
 - `src/gv/reports.py`: README findings, reproducible with `gv report <topic>`.
 - Conventions: returns are daily log returns in percent; a variance for day t uses returns up to
   t − 1 only, and HAR features for day t use data up to t; volatility is annualised with the

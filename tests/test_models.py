@@ -170,3 +170,16 @@ def test_har_features_use_data_up_to_the_day_only():
     future.iloc[25:] = 1e6
     g = m.har_features(future)
     pd.testing.assert_frame_equal(f.iloc[:25], g.iloc[:25])
+
+
+def test_predictive_loglik_matches_arch_in_sample_for_t():
+    import numpy as np
+
+    from gv.models import fit, predictive_loglik
+
+    rng = np.random.default_rng(5)
+    y = rng.standard_t(6, 1500) * 1.2
+    p = fit(y, "GJR", "t")
+    ll = predictive_loglik(y, p, "GJR", 0).sum()
+    assert np.isclose(ll, p["loglik"], rtol=1e-6)
+    assert p["gamma_t"] is not None
