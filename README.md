@@ -42,7 +42,7 @@ NIFTY is fitted the same way. Archive prices, no dividends.
   for 84% of stocks (median 0.040 against a symmetric term of 0.069), but its t-statistic passed 2 for
   only 13%. EGARCH's asymmetry pointed the same way for 81%, past t −2 for 23%.
 - **For NIFTY it was almost all bad news.** GJR put NIFTY's symmetric term at 0.000 and its bad-news
-  term at 0.140 (t 3.7): a 4% fall lifted tomorrow's volatility to 27% a year, a 4% rise left it at 13%.
+  term at 0.140 (t 3.7): a 4% fall lifted tomorrow's volatility to 26.7% a year, a 4% rise left it at 12.6%.
   Refitted on 2020–2026 the bad-news term was 0.125.
 - **On unseen years, asymmetry helped a little.** Against plain GARCH, EGARCH scored better for 75% of
   stocks (median +0.0021 log-likelihood a day, t 6.1 across stocks) and GJR for 63% (+0.0004, t 3.0).
