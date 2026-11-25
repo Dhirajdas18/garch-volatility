@@ -18,7 +18,7 @@ fresh data by GitHub Actions.
 - [x] Asymmetric GARCH (GJR, EGARCH) across 172 stocks, fitted on 2014–2019 and scored on 2020–2026
 - [x] Error distributions: normal, Student-t, skewed-t, scored by log-likelihood and VaR breaches
 - [x] Estimation in practice: parameter stability, refit schedules, unreliable fits, common parameters
-- [ ] HAR on range-based volatility and component GARCH
+- [x] HAR on range-based volatility and long-memory FIGARCH against GJR, EWMA and the 20-day variance
 - [ ] Forecasts from 1 day to 3 months across 200 stocks against the 20-day standard deviation
 - [ ] Sizing and volatility targeting with GARCH against the 20-day standard deviation, after costs
 - [ ] Market-wide stress and a risk-regime indicator
@@ -95,13 +95,34 @@ above 0.999, or put ν above 50.
 - **Common parameters were the most reliable.** One shared set of α, γ, β and ν, scaled to each
   stock's own variance, scored +0.0030 (better than frozen for 59%) with the fewest Kupiec rejections
   (12%) and a 1.02% breach rate.
+### 4. HAR on daily ranges forecast tomorrow best; the 20-day variance was the worst of five
+
+<a href="docs/img/har.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/har.png"><img src="docs/img/har.gif" alt="Average one-day QLIKE of HAR, GJR, FIGARCH and EWMA relative to the 20-day variance, scored two ways" width="720"></picture></a>
+
+Without intraday prices, each day's "realised" variance is estimated from its open, high, low and close
+(Garman-Klass) plus the squared overnight gap. HAR forecasts tomorrow's value from today's, the last
+week's and the last month's averages (in logs, by least squares). It is compared with GJR and FIGARCH
+(a long-memory GARCH, standing in for a component model, which arch lacks), both with Student-t shocks,
+EWMA (λ 0.94) and the 20-day variance of returns. All are fitted on 2014–2019 and frozen; the same 172
+stocks are forecast one day ahead over 2020–2026 (median 1,704 days) and scored by QLIKE, the standard
+volatility loss, against the range-based variance and, because HAR is fitted to that very proxy, also
+against the squared return.
+
+- **HAR forecast best.** Against the range-based variance its loss was 38% below the 20-day variance's,
+  and it was the best model for 97% of stocks. Against squared returns, where it has no home advantage,
+  it was still 9% better and best for 81%.
+- **GARCH-family models came next.** FIGARCH was 31% better than the 20-day variance (8% on squared
+  returns), GJR 28% (7%), EWMA 20% (5%).
+- **The 20-day variance came last.** Every other model beat it for 98–100% of stocks, on either target.
+- **HAR spread its weight evenly.** Median weights on the log of the last day, week and month: 0.23,
+  0.23 and 0.22. Every model's average forecast sat below the proxy's average (ratios 0.85–0.92).
 
 ## Quick start
 
 ```bash
 uv sync
 uv run python scripts/fetch_data.py         # Yahoo Finance -> data/prices.parquet
-GV_LAKE_DIR=... uv run gv report asymmetry  # also: distributions, refit
+GV_LAKE_DIR=... uv run gv report asymmetry  # also: distributions, refit, har
 uv run python scripts/build_site.py         # GARCH lab -> site/index.html (fits every model)
 uv run pytest
 ```
@@ -132,6 +153,8 @@ Every `gv report` needs a local NSE bhavcopy archive (`GV_LAKE_DIR` with `panel.
   breaches.
 - `src/gv/refit.py`: refit schedules (frozen, expanding, rolling, common parameters with variance
   targeting) scored year by year, and the unreliable-fit rule.
+- `src/gv/har.py`: range-based daily variance with the overnight gap, log-HAR, FIGARCH and GJR
+  filtered with fixed parameters, EWMA, the 20-day variance and QLIKE.
 - `src/gv/reports.py`: README findings, reproducible with `gv report <topic>`.
 - Conventions: returns are daily log returns in percent; a variance for day t uses returns up to
   t − 1 only, and HAR features for day t use data up to t; volatility is annualised with the

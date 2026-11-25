@@ -197,3 +197,27 @@ def test_predictive_density_matches_arch_loglik_for_every_distribution():
         ll, var, r = predictive_density(y, p, "GJR", 0)
         assert np.isclose(ll.sum(), p["loglik"], rtol=1e-6)
         assert 0.003 < np.mean(r < var) < 0.03
+
+
+def test_har_fit_recovers_a_known_log_har():
+    import numpy as np
+    import pandas as pd
+
+    from gv.har import har_fit, har_forecast, qlike
+
+    rng = np.random.default_rng(3)
+    n = 3000
+    lv = np.zeros(n)
+    for t in range(22, n):
+        lv[t] = (
+            0.1
+            + 0.3 * lv[t - 1]
+            + 0.3 * lv[t - 5 : t].mean()
+            + 0.3 * lv[t - 22 : t].mean()
+            + rng.normal(0, 0.3)
+        )
+    rv = pd.Series(np.exp(lv))
+    p = har_fit(rv)
+    assert p["b"][1] > 0 and abs(p["b"][1:].sum() - 0.9) < 0.1
+    f = har_forecast(rv, p)
+    assert np.isnan(f.iloc[0]) and qlike(np.array([1.0]), np.array([1.0]))[0] == 0

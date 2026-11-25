@@ -427,8 +427,87 @@ def report_refit(out_dir: Path) -> dict:
     return res
 
 
+def report_har(out_dir: Path) -> dict:
+    """One-day volatility forecasts on 2020-2026 for the 172 stocks of the asymmetry study, every
+    model fitted on 2014-2019 and frozen: log-HAR on range-based daily variance, GJR-t, FIGARCH-t
+    (long memory), EWMA and the 20-day variance; scored by QLIKE against the range-based proxy and
+    against the squared return. Needs GV_LAKE_DIR."""
+    from gv.har import FORECASTS, run
+    from gv.refit import stock_returns
+    from gv.universe import lake_ohlc, load_lake, load_universe
+
+    res = {}
+    px, _ = load_lake()
+    stocks = list(stock_returns(px, load_universe()))
+    st = run(stocks, lake_ohlc(), pd.Timestamp("2019-12-31"), pd.Timestamp("2020-01-01"))
+    res["stocks"] = (
+        f"{len(st)}; median {int(st['days'].median())} test days; GJR and FIGARCH converged for "
+        f"{st['converged'].mean():.0%}"
+    )
+    res["HAR weights (median, log daily / weekly / monthly)"] = (
+        f"{st['b_daily'].median():.2f} / {st['b_weekly'].median():.2f} / "
+        f"{st['b_monthly'].median():.2f}"
+    )
+    q = {}
+    for tgt, name in (("rv", "range-based variance"), ("r2", "squared return")):
+        t = st[[f"{k}_qlike_{tgt}" for k in FORECASTS]]
+        t.columns = list(FORECASTS)
+        q[tgt] = t
+        best = t.idxmin(axis=1).value_counts(normalize=True)
+        res[f"QLIKE against {name}"] = ", ".join(
+            f"{k} {t[k].mean():.3f} (best for {best.get(k, 0):.0%}, beats 20-day for "
+            f"{(t[k] < t['20-day']).mean():.0%})"
+            for k in FORECASTS
+        )
+    for tgt, name in (("rv", "range-based variance"), ("r2", "squared return")):
+        base = q[tgt]["20-day"].mean()
+        res[f"QLIKE vs the 20-day variance, {name}"] = ", ".join(
+            f"{k} {100 * (q[tgt][k].mean() / base - 1):+.0f}%" for k in FORECASTS[:-1]
+        )
+    res["forecast level / proxy level (median)"] = ", ".join(
+        f"{k} {st[f'{k}_bias'].median():.2f}" for k in FORECASTS
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 4.2))
+    xs = np.arange(len(FORECASTS))
+    for j, (tgt, c, lab) in enumerate(
+        (
+            ("rv", plots.SERIES[0], "against range-based variance"),
+            ("r2", plots.MUTED, "against the squared return"),
+        )
+    ):
+        base = q[tgt]["20-day"].mean()
+        v = [100 * (q[tgt][k].mean() / base - 1) for k in FORECASTS]
+        ax.bar(xs + (j - 0.5) * 0.38, v, 0.38, color=c, label=lab)
+        for i, x in enumerate(v):
+            ax.text(
+                i + (j - 0.5) * 0.38,
+                x - 1.2,
+                f"{x:.0f}%",
+                ha="center",
+                va="top",
+                fontsize=8,
+                color=plots.TEXT,
+            )
+    ax.axhline(0, color=plots.TEXT_2, lw=0.8)
+    ax.set_xticks(xs, ["HAR (range)", "GJR-t", "FIGARCH-t", "EWMA", "20-day"])
+    ax.set_ylabel("average QLIKE vs the 20-day variance, %")
+    ax.set_ylim(-45, 5)
+    ax.legend(fontsize=8, loc="lower right")
+    ax.set_title(
+        f"{len(st)} stocks, one day ahead, 2020-2026, fitted on 2014-2019 (lower is better)",
+        fontsize=10,
+        fontweight="normal",
+        loc="left",
+    )
+    fig.tight_layout()
+    plots.save(fig, out_dir, "har")
+    return res
+
+
 REPORTS: dict[str, Callable[[Path], dict]] = {
     "asymmetry": report_asymmetry,
     "distributions": report_distributions,
     "refit": report_refit,
+    "har": report_har,
 }
