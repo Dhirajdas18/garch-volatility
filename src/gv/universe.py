@@ -1,0 +1,88 @@
+"""Point-in-time universe from a local NSE bhavcopy panel (GV_LAKE_DIR/panel.parquet), which keeps
+every stock that traded, including ones later delisted. Yahoo only has today's tickers.
+
+Ported from momentum-after-costs (mo.universe). Not used by tests or the public page. The
+archive's adj_* fields are adjusted for splits and bonuses but not for dividends.
+"""
+
+import os
+from pathlib import Path
+
+import pandas as pd
+
+
+def load_lake(lake_dir: str | Path | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(price index, turnover) as wide date x symbol frames from panel.parquet.
+
+    Older lakes zero every daily move above 35% as a possible corporate action. For those, moves
+    that match a split or bonus in actions.parquet stay zeroed and the rest (real crashes and
+    rallies, e.g. YES Bank in March 2020) get their raw return back. A lake built with NSE's
+    official corporate-actions list (_ref/nse_ca/*.csv) already flags only real corporate actions,
+    so its flags are used as they are. Prices are rebuilt from returns.
+    """
+    lake_dir = lake_dir or os.environ.get("GV_LAKE_DIR")
+    if not lake_dir:
+        raise FileNotFoundError("set GV_LAKE_DIR to a bhavcopy lake folder with panel.parquet")
+    lake_dir = Path(lake_dir)
+    p = pd.read_parquet(
+        lake_dir / "panel.parquet",
+        columns=["date", "symbol", "close", "prev_close", "ret", "ca_day", "turnover"],
+    )
+    actions = lake_dir / "actions.parquet"
+    known = set()
+    if actions.exists():
+        a = pd.read_parquet(actions, columns=["date", "symbol"])
+        known = set(zip(a["symbol"], pd.to_datetime(a["date"]), strict=True))
+    flagged = p["ca_day"].fillna(False).astype(bool)
+    if any((lake_dir / "_ref" / "nse_ca").glob("*.csv")):
+        known = None  # the lake was built with NSE's official list: its flags are already right
+    matched = (
+        flagged
+        if known is None
+        else pd.Series(
+            [(s, d) in known for s, d in zip(p["symbol"], p["date"], strict=True)], index=p.index
+        )
+    )
+    raw = p["close"] / p["prev_close"] - 1
+    ret = p["ret"].where(~(flagged & ~matched), raw)
+    p = p.assign(ret=ret)
+    rets = p.pivot_table(index="date", columns="symbol", values="ret").sort_index()
+    traded = p.pivot_table(index="date", columns="symbol", values="close").sort_index().notna()
+    prices = (1 + rets.fillna(0)).cumprod().where(traded)
+    turnover = p.pivot_table(index="date", columns="symbol", values="turnover").sort_index()
+    return prices, turnover
+
+
+def load_universe(lake_dir: str | Path | None = None) -> pd.DataFrame:
+    """The reference model's point-in-time universe (date, symbol, rank, med_turnover_cr, close): each day the
+    EQ stocks priced at ₹50 or more with a year of history, ranked by median turnover over the last
+    126 trading days, top 200 kept. Built from NSE's raw bhavcopy, so delisted stocks are in it."""
+    lake_dir = lake_dir or os.environ.get("GV_LAKE_DIR")
+    if not lake_dir:
+        raise FileNotFoundError("set GV_LAKE_DIR to a bhavcopy lake folder with universe.parquet")
+    u = pd.read_parquet(Path(lake_dir) / "universe.parquet")
+    u["date"] = pd.to_datetime(u["date"])
+    return u
+
+
+def members_on(universe: pd.DataFrame, day: pd.Timestamp, n: int = 200) -> list[str]:
+    """The universe's top `n` on the last universe date on or before `day`."""
+    dates = universe["date"]
+    last = dates[dates <= day].max()
+    u = universe[(dates == last) & (universe["rank"] <= n)]
+    return list(u.sort_values("rank")["symbol"])
+
+
+def lake_ohlc(lake_dir: str | Path | None = None) -> dict[str, pd.DataFrame]:
+    """Wide date x symbol frames of the archive's adj_open, adj_high, adj_low and adj_close.
+
+    Adjusted for splits and bonuses only (no dividends), so a day's range and its close are on the
+    same basis; range-based variance estimators use these.
+    """
+    lake_dir = lake_dir or os.environ.get("GV_LAKE_DIR")
+    if not lake_dir:
+        raise FileNotFoundError("set GV_LAKE_DIR to a bhavcopy lake folder with panel.parquet")
+    fields = ["adj_open", "adj_high", "adj_low", "adj_close"]
+    p = pd.read_parquet(Path(lake_dir) / "panel.parquet", columns=["date", "symbol", *fields])
+    p["date"] = pd.to_datetime(p["date"])
+    return {f: p.pivot_table(index="date", columns="symbol", values=f).sort_index() for f in fields}
