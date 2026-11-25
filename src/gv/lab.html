@@ -1,0 +1,136 @@
+<form class="calc" id="gl" onsubmit="return false">
+  <label>Stock <input id="gl-s" name="stock" list="gl-list" autocomplete="off" spellcheck="false" autocapitalize="characters" aria-describedby="gl-s-help"></label>
+  <label>Model <select id="gl-m" name="model">
+    <option value="GARCH">GARCH</option><option value="GJR" selected>GJR</option><option value="EGARCH">EGARCH</option>
+  </select></label>
+  <label>Forecast horizon, days <input id="gl-h" name="horizon" type="number" min="1" max="63" step="1" value="21" inputmode="numeric" autocomplete="off"></label>
+  <datalist id="gl-list"></datalist>
+</form>
+<p class="note" id="gl-s-help"></p>
+<p class="note" id="gl-note" aria-live="polite"></p>
+<dl class="stat-grid" id="gl-stats"></dl>
+<h3>Daily returns with ±2σ conditional bands</h3>
+<div id="gl-ret" class="sim-chart" role="img" aria-label="Daily returns with bands at two conditional standard deviations either side of the mean"></div>
+<h3>Annualised volatility: the model against the 20-day standard deviation</h3>
+<div id="gl-vol" class="sim-chart" role="img" aria-label="Annualised conditional volatility from the model and the 20-day rolling standard deviation"></div>
+<h3 id="gl-cone-title">Volatility forecast, next 63 days</h3>
+<div id="gl-cone" class="sim-chart" role="img" aria-label="Annualised volatility forecast for each of the next 63 trading days, the average to each horizon and the long-run level"></div>
+<h3>News impact: tomorrow’s volatility after today’s surprise</h3>
+<div id="gl-news" class="sim-chart" role="img" aria-label="Tomorrow's annualised volatility against today's return surprise for the three models, with today's variance at its long-run level"></div>
+<script>
+$js
+const GL = $data;
+(() => {
+  const el = (id) => document.getElementById(id);
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const known = new Set(GL.symbols);
+  el("gl-list").innerHTML = GL.symbols.map((s) => `<option value="${s}">${GL.industries[s]}</option>`).join("");
+  // Undo the page's compact encoding: daily log returns stored as integers of 0.01%.
+  const cache = {};
+  const series = (s) => cache[s] || (cache[s] = {
+    r: GL.series[s].r.map((v) => v / (GL.scale / 100)),
+    dates: GL.dates.slice(GL.series[s].start),
+  });
+
+  // State lives in the address (#s=RELIANCE&m=GJR&h=21) so a view can be bookmarked or shared.
+  const fromHash = new URLSearchParams(location.hash.slice(1));
+  const s0 = (fromHash.get("s") || "").toUpperCase();
+  el("gl-s").value = known.has(s0) ? s0 : GL.default;
+  if (["GARCH", "GJR", "EGARCH"].includes(fromHash.get("m"))) el("gl-m").value = fromHash.get("m");
+  const h0 = parseInt(fromHash.get("h"), 10);
+  if (h0 >= 1 && h0 <= 63) el("gl-h").value = String(h0);
+
+  const ann = (v) => Math.sqrt(GL.per_year * v);  // daily variance (percent²) -> annual %
+  const num = (x, d = 2) => x.toFixed(d).replace("-", "−");
+  const pct = (x, d = 1) => num(x, d) + "%";
+  const rupees = (x) => "₹" + Math.round(x).toLocaleString("en-IN");
+  const day = (d) => new Date(d + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  const cfg = { displaylogo: false, responsive: true };
+  const base = () => ({ paper_bgcolor: css("--surface"), plot_bgcolor: css("--surface"),
+    font: { family: getComputedStyle(document.body).fontFamily, color: css("--text-2"), size: 12 },
+    margin: { l: 56, r: 16, t: 32, b: 40 }, legend: { orientation: "h", y: 1.02, yanchor: "bottom", x: 0 },
+    hovermode: "x unified", xaxis: { gridcolor: css("--grid") } });
+  const hline = (y, color, dash) => ({ type: "line", xref: "paper", x0: 0, x1: 1, y0: y, y1: y, line: { color, width: 1, dash } });
+
+  const update = () => {
+    const s = el("gl-s").value.trim().toUpperCase(), model = el("gl-m").value;
+    const hRaw = parseInt(el("gl-h").value, 10);
+    const h = Number.isFinite(hRaw) ? Math.min(63, Math.max(1, hRaw)) : 21;
+    el("gl-s-help").textContent = known.has(s) ? `${s}: ${GL.industries[s]}.` : "";
+    if (!known.has(s)) {
+      el("gl-note").textContent = `Pick a stock from the list (${s || "blank"} is not in it).`;
+      return;
+    }
+    history.replaceState(null, "", `#s=${encodeURIComponent(s)}&m=${model}&h=${h}`);
+    const { r, dates } = series(s), p = GL.series[s].fit[model];
+    const s2 = conditionalVariance(r, p, model), state = lastState(r, p, model);
+    const f = forecastVariance(state, p, model, 63), lr = longRunVariance(p, model);
+    const sd20 = rollingStd(r, 20), n = r.length;
+    const avgTo = [];
+    f.reduce((acc, v, k) => { avgTo.push((acc + v) / (k + 1)); return acc + v; }, 0);
+    const hl = halfLife(p, model), var99 = valueAtRisk(p.mu, f[0], p.q01);
+
+    const stats = [
+      ["Persistence", num(persistence(p, model), 3)],
+      ["Half-life", Number.isFinite(hl) ? `${num(hl, 0)} days` : "none"],
+      ["Long-run volatility", Number.isFinite(lr) ? pct(ann(lr)) : "–"],
+      ["Asymmetry γ", num(p.gamma, 3)],
+      ["t degrees of freedom", num(p.nu, 1)],
+      ["Tomorrow’s volatility", pct(ann(f[0]))],
+      [`Next ${h} days`, pct(ann(avgTo[h - 1]))],
+      ["20-day standard deviation", pct(Math.sqrt(GL.per_year) * sd20[n - 1])],
+      ["1-day 99% VaR on ₹1 lakh", rupees(var99)],
+    ];
+    el("gl-stats").innerHTML = stats.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+    const warn = p.converged ? "" : " The fit did not converge; treat these numbers with care.";
+    el("gl-note").textContent = `${s}, ${model} with Student-t shocks, fitted on ${day(dates[0])} to ${GL.last}: ` +
+      `tomorrow’s volatility ${pct(ann(f[0]))} a year against ${pct(Math.sqrt(GL.per_year) * sd20[n - 1])} from the last 20 days; ` +
+      `over the next ${h} days ${pct(ann(avgTo[h - 1]))}.${warn}`;
+
+    const t2 = css("--text-2"), ca = css("--accent"), cb = css("--accent-2"), mu = css("--muted");
+    const sd = s2.map(Math.sqrt);
+    Plotly.react("gl-ret", [
+      { x: dates, y: r, type: "bar", marker: { color: mu }, name: "daily return", hovertemplate: "%{y:.2f}%" },
+      { x: dates, y: sd.map((v) => p.mu + 2 * v), mode: "lines", line: { color: ca, width: 1.5 }, name: "mean ± 2σ", hovertemplate: "%{y:.2f}%" },
+      { x: dates, y: sd.map((v) => p.mu - 2 * v), mode: "lines", line: { color: ca, width: 1.5 }, name: "mean − 2σ", showlegend: false, hovertemplate: "%{y:.2f}%" },
+    ], Object.assign(base(), { bargap: 0, yaxis: { title: "daily log return, %", gridcolor: css("--grid"), ticksuffix: "%" } }), cfg);
+
+    Plotly.react("gl-vol", [
+      { x: dates, y: sd20.map((v) => v === null ? null : Math.sqrt(GL.per_year) * v), mode: "lines", line: { color: t2, width: 1.2, dash: "dot" }, name: "20-day standard deviation", hovertemplate: "%{y:.1f}%" },
+      { x: dates, y: s2.map(ann), mode: "lines", line: { color: ca, width: 2 }, name: `${model} conditional volatility`, hovertemplate: "%{y:.1f}%" },
+    ], Object.assign(base(), { yaxis: { title: "annualised volatility, %", gridcolor: css("--grid"), ticksuffix: "%", rangemode: "tozero" } }), cfg);
+
+    const ahead = f.map((_, k) => k + 1);
+    const shapes = [{ type: "line", yref: "paper", x0: h, x1: h, y0: 0, y1: 1, line: { color: t2, width: 1, dash: "dot" } }];
+    if (Number.isFinite(lr)) shapes.push(hline(ann(lr), mu, "dash"));
+    Plotly.react("gl-cone", [
+      { x: ahead, y: f.map(ann), mode: "lines", line: { color: ca, width: 2 }, name: "forecast for that day", hovertemplate: "%{y:.1f}%" },
+      { x: ahead, y: avgTo.map(ann), mode: "lines", line: { color: cb, width: 2 }, name: "average to that day", hovertemplate: "%{y:.1f}%" },
+      { x: ahead, y: ahead.map(() => Math.sqrt(GL.per_year) * sd20[n - 1]), mode: "lines", line: { color: t2, width: 1.2, dash: "dot" }, name: "20-day standard deviation today", hovertemplate: "%{y:.1f}%" },
+    ], Object.assign(base(), { shapes,
+      annotations: Number.isFinite(lr) ? [{ xref: "paper", x: 1, xanchor: "right", y: ann(lr), yanchor: "bottom", text: `long run ${pct(ann(lr))}`, showarrow: false, font: { color: t2, size: 11 } }] : [],
+      xaxis: { title: "trading days ahead", gridcolor: css("--grid"), range: [1, 63] },
+      yaxis: { title: "annualised volatility, %", gridcolor: css("--grid"), ticksuffix: "%", rangemode: "tozero" } }), cfg);
+    el("gl-cone-title").textContent = model === "EGARCH"
+      ? "Volatility forecast, next 63 days (EGARCH: exp of the expected log variance)"
+      : "Volatility forecast, next 63 days";
+
+    // News impact: the same shocks, in percent, for all three models; the chosen one stands out.
+    const ref = Math.sqrt(longRunVariance(GL.series[s].fit.GARCH, "GARCH")) || Math.sqrt(lr) || 1;
+    const shocks = Array.from({ length: 121 }, (_, k) => -5 * ref + k * ref / 12);
+    const colors = { GARCH: t2, GJR: ca, EGARCH: cb };
+    Plotly.react("gl-news", ["GARCH", "GJR", "EGARCH"].map((mod) => {
+      const q = GL.series[s].fit[mod], v = newsImpact(q, mod, shocks);
+      return { x: shocks, y: v.map((x) => Number.isFinite(x) ? ann(x) : null), mode: "lines",
+        line: { color: colors[mod], width: mod === model ? 2.5 : 1.2, dash: mod === model ? "solid" : "dot" },
+        name: mod, hovertemplate: "%{y:.1f}%" };
+    }), Object.assign(base(), { hovermode: "x unified",
+      xaxis: { title: "today’s return surprise, %", gridcolor: css("--grid"), ticksuffix: "%", zeroline: true, zerolinecolor: css("--grid") },
+      yaxis: { title: "tomorrow’s volatility, annualised %", gridcolor: css("--grid"), ticksuffix: "%", rangemode: "tozero" } }), cfg);
+  };
+  el("gl").addEventListener("change", update);
+  el("gl-h").addEventListener("input", update);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", update);
+  update();
+})();
+</script>
