@@ -54,7 +54,7 @@ def load_lake(lake_dir: str | Path | None = None) -> tuple[pd.DataFrame, pd.Data
 
 
 def load_universe(lake_dir: str | Path | None = None) -> pd.DataFrame:
-    """The reference model's point-in-time universe (date, symbol, rank, med_turnover_cr, close): each day the
+    """Point-in-time universe (date, symbol, rank, med_turnover_cr, close): each day the
     EQ stocks priced at ₹50 or more with a year of history, ranked by median turnover over the last
     126 trading days, top 200 kept. Built from NSE's raw bhavcopy, so delisted stocks are in it."""
     lake_dir = lake_dir or os.environ.get("GV_LAKE_DIR")
